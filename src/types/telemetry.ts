@@ -36,6 +36,9 @@ export interface LeaderboardEntry {
   s1Time: string;
   s2Time: string;
   s3Time: string;
+  s1BestTime?: string;
+  s2BestTime?: string;
+  s3BestTime?: string;
   s1Status: SectorStatus;
   s2Status: SectorStatus;
   s3Status: SectorStatus;
@@ -120,10 +123,13 @@ export interface RaceControlMessage {
   id: string;
   timestamp: string;
   flag?: 'GREEN' | 'YELLOW' | 'DOUBLE_YELLOW' | 'RED' | 'BLACK_WHITE' | 'CHEQUERED';
-  scope: 'Track' | 'Sector 1' | 'Sector 2' | 'Sector 3' | 'Pit Lane' | 'Driver';
+  sector?: number;
+  driverNumber?: number;
+  scope: 'Track' | 'Sector 1' | 'Sector 2' | 'Sector 3' | 'Pit Lane' | 'Driver' | string;
   messageEn: string;
   messageEs: string;
-  category: 'FLAG' | 'SAFETY_CAR' | 'INVESTIGATION' | 'PENALTY' | 'DRS' | 'TRACK_LIMITS' | 'SYSTEM';
+  category: 'FLAG' | 'SAFETY_CAR' | 'INVESTIGATION' | 'PENALTY' | 'DRS' | 'TRACK_LIMITS' | 'SYSTEM' | 'INCIDENT' | 'PIT_LANE' | 'WEATHER';
+  lap?: number;
 }
 
 export interface TeamRadio {

@@ -8,6 +8,7 @@ import type {
   LeaderboardEntry, 
   CarTelemetry as CarTelemetryType, 
   SessionState, 
+  TrackStatus,
   RaceControlMessage, 
   TeamRadio, 
   PitPrediction 
@@ -16,15 +17,12 @@ import { Header } from './components/Header';
 import { Leaderboard } from './components/Leaderboard';
 import { BestLapBenchmarks } from './components/BestLapBenchmarks';
 import { FastestBySector } from './components/FastestBySector';
-import { TrackFlagIndicator } from './components/TrackFlagIndicator';
 import { RaceControl } from './components/RaceControl';
 import { ScheduleView } from './components/ScheduleView';
-import { HomeSketchLayout } from './components/HomeSketchLayout';
+import { HomeDashboardView } from './components/HomeDashboardView';
 import { OfficialLeaderboardView } from './components/OfficialLeaderboardView';
-import { DRIVER_MAP } from './data/drivers';
 import { F1_SCHEDULE } from './data/schedule';
 import { useLanguage } from './context/LanguageContext';
-import { CloudSun, Wind, Droplets, Thermometer, Clock, CheckCircle2 } from 'lucide-react';
 
 import './styles/global.css';
 import './styles/dashboard.css';
@@ -34,6 +32,7 @@ import './styles/car-telemetry.css';
 import './styles/race-control.css';
 import './styles/schedule.css';
 import './styles/home-layout.css';
+import './styles/sidebar-drawer.css';
 
 export const App: React.FC = () => {
   const { t } = useLanguage();
@@ -45,8 +44,8 @@ export const App: React.FC = () => {
   }
   const engine = engineRef.current;
 
-  // Active tab: 'timing' matches formula1dashboard live timing layout
-  const [activeTab, setActiveTab] = useState<'home' | 'timing' | 'leaderboard' | 'schedule'>('timing');
+  // Active tab: 'home' matches formula1dashboard main dashboard
+  const [activeTab, setActiveTab] = useState<'home' | 'timing' | 'leaderboard' | 'schedule'>('home');
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -56,18 +55,19 @@ export const App: React.FC = () => {
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            const allZero = parsed.every((e: any) => !e.tyre || e.tyre.age === 0);
-            if (allZero) {
-              parsed.forEach((entry: any, i: number) => {
-                const age = i === 0 ? 2 : i === 1 ? 2 : i === 2 ? 5 : ((i * 2 + 1) % 6) + 1;
+            parsed.forEach((entry: any, i: number) => {
+              const age = i === 0 ? 18 : i === 1 ? 18 : i === 2 ? 8 : ((i * 2 + 3) % 15) + 4;
+              if (!entry.tyre || entry.tyre.age === 0) {
                 entry.tyre = {
                   compound: i === 2 || i === 6 ? 'MEDIUM' : i === 7 ? 'HARD' : 'SOFT',
                   age,
                   used: age > 1,
                 };
-                entry.lapsCompleted = age;
-              });
-            }
+              }
+              if (!entry.lapsCompleted || entry.lapsCompleted < 10) {
+                entry.lapsCompleted = i >= 17 ? 17 : 18;
+              }
+            });
             return parsed;
           }
         }
@@ -80,7 +80,7 @@ export const App: React.FC = () => {
     if (typeof window !== 'undefined') {
       try {
         const savedFinished = localStorage.getItem('f1_session_finished_at_ms');
-        if (savedFinished) {
+        if (savedFinished && base.trackStatus === 'CHEQUERED') {
           const parsed = Number(savedFinished);
           if (!isNaN(parsed) && parsed > 0) {
             return { ...base, finishedAtMs: parsed };
@@ -91,8 +91,8 @@ export const App: React.FC = () => {
     return base;
   });
   const [selectedDriverId, setSelectedDriverId] = useState<string>(() => engine.getSelectedDriverId());
-  const [telemetry, setTelemetry] = useState<CarTelemetryType | null>(() => engine.getSelectedTelemetry());
-  const [pitPrediction, setPitPrediction] = useState<PitPrediction | null>(() => engine.calculatePitPrediction('ant'));
+  const [, setTelemetry] = useState<CarTelemetryType | null>(() => engine.getSelectedTelemetry());
+  const [, setPitPrediction] = useState<PitPrediction | null>(() => engine.calculatePitPrediction('ant'));
   const [raceControlMessages, setRaceControlMessages] = useState<RaceControlMessage[]>(() => engine.getRaceControlMessages());
   const [teamRadios, setTeamRadios] = useState<TeamRadio[]>(() => engine.getTeamRadios());
 
@@ -102,10 +102,35 @@ export const App: React.FC = () => {
 
   // Official live status
   const [isOfficialLive, setIsOfficialLive] = useState<boolean>(false);
-  const [officialStatusMessage, setOfficialStatusMessage] = useState<string>('Conectado a los datos oficiales de Fórmula 1');
+  const [, setOfficialStatusMessage] = useState<string>('Conectado a los datos oficiales de Fórmula 1');
 
-  const nextGp = F1_SCHEDULE.find(gp => !gp.completed) || F1_SCHEDULE[15];
-  const nextSessionName = `${nextGp.name} (${nextGp.circuitName})`;
+  // Synchronize right panel height exactly with the leaderboard table
+  const leftPanelRef = useRef<HTMLDivElement>(null);
+  const [leftPanelHeight, setLeftPanelHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!leftPanelRef.current) return;
+    const updateHeight = () => {
+      if (leftPanelRef.current) {
+        const h = leftPanelRef.current.offsetHeight;
+        if (h > 0) {
+          setLeftPanelHeight(h);
+        }
+      }
+    };
+
+    updateHeight();
+    const observer = new ResizeObserver(() => {
+      updateHeight();
+    });
+    observer.observe(leftPanelRef.current);
+    window.addEventListener('resize', updateHeight);
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateHeight);
+    };
+  }, [activeTab, leaderboard.length]);
 
   // ===== REAL-TIME SESSION DETECTION FROM OFFICIAL SCHEDULE =====
   // Returns the currently active session (if any) or null based on real UTC clock
@@ -120,17 +145,6 @@ export const App: React.FC = () => {
         if (now >= start && now <= end) {
           return { gp, sess, start, end, durSec: durMin * 60, remainingSec: Math.max(0, (end.getTime() - now.getTime()) / 1000) };
         }
-      }
-    }
-    return null;
-  };
-
-  const getNextScheduledSession = () => {
-    const now = new Date();
-    for (const gp of F1_SCHEDULE) {
-      for (const sess of gp.sessions) {
-        const start = new Date(sess.startTimeUtc);
-        if (start > now) return { gp, sess, start };
       }
     }
     return null;
@@ -275,19 +289,69 @@ export const App: React.FC = () => {
           engine.ingestSignalRTimingData(timingData);
         }
       },
-      onRaceControl: (msg) => {
-        if (msg) {
-          const text = typeof msg === 'string' ? msg : msg.Message || JSON.stringify(msg);
-          const newMsg: RaceControlMessage = {
-            id: `rc-${Date.now()}`,
-            timestamp: new Date().toLocaleTimeString(),
-            flag: 'GREEN',
-            scope: 'Track',
-            messageEn: text,
-            messageEs: text,
-            category: 'SYSTEM',
-          };
-          setRaceControlMessages(prev => [newMsg, ...prev]);
+      onRaceControl: (rawMsg) => {
+        if (!rawMsg) return;
+        const rawText = typeof rawMsg === 'string' ? rawMsg : rawMsg.Message || rawMsg.messageEn || JSON.stringify(rawMsg);
+        const flagStr = String(rawMsg.Flag || rawMsg.flag || '').toUpperCase();
+        let flag: RaceControlMessage['flag'] = 'GREEN';
+        if (flagStr.includes('DOUBLE') || rawText.toUpperCase().includes('DOUBLE YELLOW')) {
+          flag = 'DOUBLE_YELLOW';
+        } else if (flagStr.includes('YELLOW') || rawText.toUpperCase().includes('YELLOW')) {
+          flag = 'YELLOW';
+        } else if (flagStr.includes('RED') || rawText.toUpperCase().includes('RED')) {
+          flag = 'RED';
+        } else if (flagStr.includes('CHEQUERED') || rawText.toUpperCase().includes('CHEQUERED')) {
+          flag = 'CHEQUERED';
+        }
+
+        let category: RaceControlMessage['category'] = 'FLAG';
+        const upper = rawText.toUpperCase();
+        if (upper.includes('SAFETY CAR')) category = 'SAFETY_CAR';
+        else if (upper.includes('DELETED') || upper.includes('TRACK LIMITS')) category = 'INCIDENT';
+        else if (upper.includes('PIT')) category = 'PIT_LANE';
+        else if (upper.includes('RAIN') || upper.includes('WEATHER')) category = 'WEATHER';
+
+        const timeStr = rawMsg.Utc 
+          ? new Date(rawMsg.Utc).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          : new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+        const newMsg: RaceControlMessage = {
+          id: `rc-sig-${rawMsg.Utc || Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          timestamp: timeStr,
+          flag,
+          scope: rawMsg.Scope || 'Track',
+          sector: rawMsg.Sector ? Number(rawMsg.Sector) : undefined,
+          driverNumber: rawMsg.RacingNumber ? Number(rawMsg.RacingNumber) : undefined,
+          messageEn: rawText,
+          messageEs: rawMsg.messageEs || rawText,
+          category,
+        };
+
+        if (flag === 'RED' || flag === 'YELLOW' || flag === 'CHEQUERED' || flag === 'GREEN') {
+          setSession(prev => ({
+            ...prev,
+            trackStatus: flag,
+            safetyCarDeployed: category === 'SAFETY_CAR',
+          }));
+        }
+
+        setRaceControlMessages(prev => [newMsg, ...prev.filter(m => m.id !== newMsg.id)]);
+      },
+      onClock: (clockData) => {
+        if (clockData && typeof clockData === 'object') {
+          const remaining = clockData.Remaining;
+          const isExtrapolating = clockData.Extrapolating !== false;
+          if (remaining && typeof remaining === 'string') {
+            const parts = remaining.split(':').map(Number);
+            let sec = 0;
+            if (parts.length === 3) sec = parts[0] * 3600 + parts[1] * 60 + parts[2];
+            else if (parts.length === 2) sec = parts[0] * 60 + parts[1];
+            setSession(prev => ({
+              ...prev,
+              timeRemainingSec: sec,
+              trackStatus: !isExtrapolating && prev.trackStatus !== 'CHEQUERED' ? 'RED' : prev.trackStatus,
+            }));
+          }
         }
       },
     });
@@ -394,6 +458,23 @@ export const App: React.FC = () => {
       }
     });
 
+    const unsubscribeRaceControl = f1LiveWebSocketService.subscribeRaceControl((liveMsg) => {
+      const mappedStatus: TrackStatus | null =
+        liveMsg.flag === 'RED' ? 'RED' :
+        liveMsg.flag === 'YELLOW' || liveMsg.flag === 'DOUBLE_YELLOW' ? 'YELLOW' :
+        liveMsg.flag === 'CHEQUERED' ? 'CHEQUERED' :
+        liveMsg.flag === 'GREEN' ? 'GREEN' : null;
+
+      if (mappedStatus) {
+        setSession(prev => ({
+          ...prev,
+          trackStatus: mappedStatus,
+          safetyCarDeployed: liveMsg.category === 'SAFETY_CAR',
+        }));
+      }
+      setRaceControlMessages(prev => [liveMsg, ...prev.filter(m => m.id !== liveMsg.id)]);
+    });
+
     const unsubscribeCarData = f1LiveWebSocketService.subscribeCarData((carDataMap) => {
       engine.ingestLiveCarData(carDataMap);
     });
@@ -402,6 +483,7 @@ export const App: React.FC = () => {
       f1LiveWebSocketService.stopConnection();
       unsubscribeStatus();
       unsubscribeEntries();
+      unsubscribeRaceControl();
       unsubscribeCarData();
     };
   }, [engine]);
@@ -416,7 +498,20 @@ export const App: React.FC = () => {
         setPitPrediction(data.pitPrediction);
       },
       onRaceControlMessage: (msg) => {
-        setRaceControlMessages(prev => [msg, ...prev]);
+        const mappedStatus: TrackStatus | null =
+          msg.flag === 'RED' ? 'RED' :
+          msg.flag === 'YELLOW' || msg.flag === 'DOUBLE_YELLOW' ? 'YELLOW' :
+          msg.flag === 'CHEQUERED' ? 'CHEQUERED' :
+          msg.flag === 'GREEN' ? 'GREEN' : null;
+
+        if (mappedStatus) {
+          setSession(prev => ({
+            ...prev,
+            trackStatus: mappedStatus,
+            safetyCarDeployed: msg.category === 'SAFETY_CAR',
+          }));
+        }
+        setRaceControlMessages(prev => [msg, ...prev.filter(m => m.id !== msg.id)]);
       },
       onTeamRadio: (radio) => {
         setTeamRadios(prev => [radio, ...prev]);
@@ -436,8 +531,6 @@ export const App: React.FC = () => {
     engine.setSelectedDriver(driverId);
   };
 
-  const selectedDriver = DRIVER_MAP.get(selectedDriverId);
-
   return (
     <div className="app-container">
       {/* Top Header Navigation (With F1 SignalR status, zero fake controls) */}
@@ -449,114 +542,27 @@ export const App: React.FC = () => {
         signalRStatus={signalRStatus}
         signalRDetails={signalRDetails}
         onRefreshLive={checkStatus}
+        trackStatus={session.trackStatus || 'GREEN'}
+        raceControlMessages={raceControlMessages}
       />
 
       {/* Main View Area */}
       <main className="main-content">
         <div key={activeTab} className="tab-page-transition">
-          {/* TAB: Home Sketch Layout (Left: telemetrix + SCHEDULE, Right: Led / Leaderboard) */}
+          {/* TAB: Home Formula 1 Dashboard (Replicating formula1dashboard.com) */}
           {activeTab === 'home' && (
-            <HomeSketchLayout
-              circuit={session.circuit}
-              entries={leaderboard}
-              selectedDriverId={selectedDriverId}
-              onSelectDriver={handleSelectDriver}
-              telemetry={telemetry}
-              selectedDriver={selectedDriver}
-              pitPrediction={pitPrediction}
-              trackStatus={session.trackStatus}
-              isOfficialLive={isOfficialLive}
-              statusMessage={officialStatusMessage}
-              nextSessionName={nextSessionName}
-              onOpenFullSchedule={() => setActiveTab('schedule')}
+            <HomeDashboardView
+              onNavigate={(tab) => setActiveTab(tab)}
             />
           )}
 
           {/* TAB: Full Live Timing & Telemetry Dashboard */}
           {activeTab === 'timing' && (
             <>
-              {/* Top Status & Weather Conditions Strip */}
-              {!isOfficialLive ? (
-                <div className="weather-strip" style={{
-                  background: 'linear-gradient(90deg, rgba(8, 14, 24, 0.95) 0%, rgba(18, 24, 38, 0.95) 100%)',
-                  border: '1px solid rgba(0, 215, 182, 0.3)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  flexWrap: 'wrap',
-                  gap: '12px',
-                  padding: '10px 16px',
-                  borderRadius: '8px',
-                  marginBottom: '14px'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                    <span className="f1-badge" style={{ background: 'rgba(255, 215, 0, 0.15)', color: '#ffd700', border: '1px solid rgba(255, 215, 0, 0.35)', display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                      <Clock size={12} color="#ffd700" />
-                      <span>{t('last_session_banner_title', { circuit: session.circuit.name })}</span>
-                    </span>
-
-                    <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                      {t('last_session_banner_desc', { nextSession: `${nextGp.flag} ${nextGp.name}` })}
-                    </span>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
-                    <div className="weather-item">
-                      <CloudSun size={14} color="var(--color-yellow)" />
-                      <span>{t('track')}: <strong>{session.circuit.name}</strong></span>
-                    </div>
-                    <div className="weather-item">
-                      <Thermometer size={14} color="#ff5555" />
-                      <span>{t('air')}: <strong>{session.airTemp}°C</strong></span>
-                    </div>
-                    <div className="weather-item">
-                      <Thermometer size={14} color="#ff9900" />
-                      <span>{t('asphalt')}: <strong>{session.trackTemp}°C</strong></span>
-                    </div>
-                    <span className="f1-badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                      <CheckCircle2 size={11} />
-                      <span>{t('auto_sync_ready')}</span>
-                    </span>
-                  </div>
-                </div>
-              ) : (
-                <div className="weather-strip">
-                  <div className="weather-item">
-                    <CloudSun size={15} color="var(--color-yellow)" />
-                    <span>{t('track')}: <strong>{session.circuit.name}</strong></span>
-                  </div>
-                  <div className="weather-item">
-                    <Thermometer size={14} color="#ff5555" />
-                    <span>{t('air')}: <strong>{session.airTemp}°C</strong></span>
-                  </div>
-                  <div className="weather-item">
-                    <Thermometer size={14} color="#ff9900" />
-                    <span>{t('asphalt')}: <strong>{session.trackTemp}°C</strong></span>
-                  </div>
-                  <div className="weather-item">
-                    <Droplets size={14} color="#00a6ff" />
-                    <span>{t('humidity')}: <strong>{session.humidity}%</strong></span>
-                  </div>
-                  <div className="weather-item">
-                    <Wind size={14} color="#94a3b8" />
-                    <span>{t('wind')}: <strong>{session.windSpeed} km/h</strong></span>
-                  </div>
-                  <div className="weather-item" style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <span className="f1-badge badge-live">🔴 {t('live')}</span>
-                  </div>
-                </div>
-              )}
-
-              {/* Indicador de Banderas en Vivo (Verde / Amarilla con sector / Roja / SC) */}
-              <TrackFlagIndicator
-                trackStatus={session.trackStatus || 'GREEN'}
-                messages={raceControlMessages}
-              />
-
               {/* Telemetry Layout Grid: 80% Tabla de tiempos (Leaderboard) / 20% Barra Lateral */}
               <div className="telemetry-layout-grid">
                 {/* Panel Izquierdo: Tabla de Tiempos (Full Height, 80% Ancho) */}
-                <div className="telemetry-left-panel">
+                <div className="telemetry-left-panel" ref={leftPanelRef}>
                   <Leaderboard
                     entries={leaderboard}
                     selectedDriverId={selectedDriverId}
@@ -567,16 +573,23 @@ export const App: React.FC = () => {
                 </div>
 
                 {/* Columna Derecha: Benchmarks + Control de Carrera / Radios + Más Rápido por Sector */}
-                <div className="telemetry-right-panel">
-                  {/* 1. Best Lap Benchmarks (Session Best morado + récords) */}
+                <div 
+                  className="telemetry-right-panel"
+                  style={{
+                    height: leftPanelHeight ? `${leftPanelHeight}px` : '100%',
+                    maxHeight: leftPanelHeight ? `${leftPanelHeight}px` : undefined,
+                  }}
+                >
+                  {/* 1. Best Lap Benchmarks (Session Best, Weekend Best, Circuit Record) */}
                   <BestLapBenchmarks
                     entries={leaderboard}
                     sessionName={session.name || 'Practice 3'}
                     circuitName={session.circuit.name}
+                    circuit={session.circuit}
                   />
 
-                  {/* 2. Control de Carrera y Radios de Equipo */}
-                  <div className="telemetry-rc-section" style={{ flex: 1, minHeight: '260px', display: 'flex', flexDirection: 'column' }}>
+                  {/* 2. Control de Carrera y Radios de Equipo (flex: 1 con scroll interno en los mensajes) */}
+                  <div className="telemetry-rc-section" style={{ flex: '1 1 0', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                     <RaceControl
                       messages={raceControlMessages}
                       radios={teamRadios}
@@ -585,39 +598,6 @@ export const App: React.FC = () => {
 
                   {/* 3. Más Rápido por Sector (Sustituye al velocímetro) */}
                   <FastestBySector entries={leaderboard} />
-
-                  {/* Entre sesiones: banner informativo elegante */}
-                  {!isOfficialLive && (() => {
-                    const next = getNextScheduledSession();
-                    const nowMs = Date.now();
-                    const lastSess = F1_SCHEDULE
-                      .flatMap(gp => gp.sessions.map(s => ({ gp, s })))
-                      .filter(({ s }) => new Date(s.startTimeUtc).getTime() < nowMs)
-                      .pop();
-                    return (
-                      <div className="f1-card" style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontSize: '0.62rem', fontFamily: 'var(--font-mono)', color: '#888', textTransform: 'uppercase', letterSpacing: '0.08em' }}>⏸ ENTRE SESIONES</span>
-                        </div>
-                        {lastSess && (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontSize: '0.70rem', color: 'var(--text-muted)' }}>Última:</span>
-                            <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#aaa' }}>{lastSess.s.name} — {lastSess.gp.name}</span>
-                            <span style={{ fontSize: '0.62rem', color: '#555', background: 'rgba(255,255,255,0.05)', padding: '1px 5px', borderRadius: '3px', fontFamily: 'var(--font-mono)' }}>FINALIZADA</span>
-                          </div>
-                        )}
-                        {next && (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <span style={{ fontSize: '0.70rem', color: 'var(--text-muted)' }}>Siguiente:</span>
-                            <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', fontWeight: 700, color: '#fff' }}>{next.sess.name} — {next.gp.name}</span>
-                            <span style={{ fontSize: '0.62rem', fontFamily: 'var(--font-mono)', color: '#00D7B6', background: 'rgba(0,215,182,0.08)', border: '1px solid rgba(0,215,182,0.2)', padding: '1px 5px', borderRadius: '3px' }}>
-                              {new Date(next.start).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })()}
                 </div>
               </div>
             </>

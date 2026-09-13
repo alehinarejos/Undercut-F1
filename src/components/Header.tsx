@@ -1,20 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import type { SessionState } from '../types/telemetry';
+import type { SessionState, RaceControlMessage } from '../types/telemetry';
 import type { SignalRConnectionStatus } from '../services/f1SignalRClient';
 import { scheduleSyncService, getGrandPrixTimeline } from '../services/scheduleSyncService';
 import type { ScheduleSyncState } from '../services/scheduleSyncService';
 import { useLanguage } from '../context/LanguageContext';
 import { LanguageSelector } from './LanguageSelector';
 import { 
-  Calendar, 
-  Gauge, 
-  LayoutDashboard,
-  Trophy,
   RotateCw,
   Radio,
   Wifi,
-  Clock
+  Clock,
+  Menu,
+  CloudSun,
+  Thermometer
 } from 'lucide-react';
+import { SidebarDrawer } from './SidebarDrawer';
+import { TrackFlagIndicator } from './TrackFlagIndicator';
 
 interface HeaderProps {
   session: SessionState;
@@ -24,6 +25,8 @@ interface HeaderProps {
   signalRStatus?: SignalRConnectionStatus;
   signalRDetails?: string;
   onRefreshLive?: () => void;
+  trackStatus?: string;
+  raceControlMessages?: RaceControlMessage[];
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -33,10 +36,15 @@ export const Header: React.FC<HeaderProps> = ({
   isOfficialLive,
   signalRStatus = 'connected',
   onRefreshLive,
+  trackStatus,
+  raceControlMessages = [],
 }) => {
   const { t } = useLanguage();
   const isStreaming = signalRStatus === 'live_streaming' || isOfficialLive;
   const isConnected = signalRStatus === 'connected' || signalRStatus === 'live_streaming';
+
+  // Collapsible sidebar menu state
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   // Schedule subscription to get current / next GP and sessions
   const [scheduleState, setScheduleState] = useState<ScheduleSyncState>(scheduleSyncService.getState());
@@ -87,39 +95,31 @@ export const Header: React.FC<HeaderProps> = ({
     return `${day} ${hours}:${minutes}h`;
   };
 
-  // Maximum cooldown for Chequered Flag display: 1.5 hours (90 min)
-  const CHEQUERED_COOLDOWN_MS = 90 * 60 * 1000;
+  // Helper to shorten overly long GP names so header elements fit comfortably
+  const getCompactGpName = (name: string): string => {
+    if (!name) return 'F1 GP';
+    return name
+      .replace(/^Gran Premio de /i, 'GP ')
+      .replace(/^Grand Prix of /i, 'GP ')
+      .replace(/\s*202[0-9]/, '');
+  };
 
-  // Determine Chequered vs Live vs Standby states
-  const isRecentFinish = (() => {
-    // 1. If we have explicit finishedAtMs timestamp from live stream
-    if (session.finishedAtMs) {
-      return (nowMs - session.finishedAtMs) < CHEQUERED_COOLDOWN_MS;
-    }
-    // 2. If trackStatus is CHEQUERED but no timestamp, fall back to timeline or default 90m
-    if (session.trackStatus === 'CHEQUERED') {
-      if (lastFinishedSession && !isNaN(lastFinishedSession.endTime)) {
-        return (nowMs - lastFinishedSession.endTime) < CHEQUERED_COOLDOWN_MS;
-      }
-      return true;
-    }
-    // 3. Fallback based on schedule timeline
-    if (!activeTimelineSession && lastFinishedSession && !isNaN(lastFinishedSession.endTime)) {
-      return (nowMs - lastFinishedSession.endTime) < CHEQUERED_COOLDOWN_MS;
-    }
-    return false;
-  })();
-
-  const isChequered = !activeTimelineSession && !isOfficialLive && isRecentFinish;
+  // Track status is Chequered
+  const isChequered = session.trackStatus === 'CHEQUERED';
 
   const isLiveActive = !isChequered && (
+    session.type === 'RACE' ||
+    (session.totalLaps !== undefined && session.totalLaps > 0) ||
     activeTimelineSession != null ||
-    (isOfficialLive && isStreaming && session.trackStatus !== 'CHEQUERED' && (session.timeRemainingSec > 0 || session.type === 'RACE'))
+    (isOfficialLive && isStreaming && session.trackStatus !== 'CHEQUERED')
   );
 
   const remainingSec = (() => {
     if (session.timeRemainingSec > 0) return session.timeRemainingSec;
     if (activeTimelineSession) {
+      if (session.trackStatus === 'RED') {
+        return session.timeRemainingSec || 0;
+      }
       return Math.max(0, Math.floor((activeTimelineSession.endTime - nowMs) / 1000));
     }
     return 0;
@@ -162,29 +162,40 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="f1-header">
       <div className="header-top">
-        {/* Brand */}
-        <div className="brand-section">
-          <div className="f1-logo-badge" style={{ letterSpacing: '0.02em', padding: '4px 8px', fontSize: '1rem', fontWeight: 900 }}>
+        {/* Brand with Collapsible Menu Toggle */}
+        <div className="brand-section" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button 
+            className="sidebar-hamburger-btn"
+            onClick={() => setIsSidebarOpen(true)}
+            title="Abrir menú de navegación"
+            aria-label="Abrir menú lateral"
+          >
+            <Menu size={16} />
+            <span className="hamburger-text">MENÚ</span>
+          </button>
+
+          <div className="f1-logo-badge" style={{ letterSpacing: '0.02em', padding: '3px 7px', fontSize: '0.92rem', fontWeight: 900 }}>
             UC
           </div>
           <div className="app-title-group">
-            <span className="app-name" style={{ letterSpacing: '0.06em', display: 'flex', alignItems: 'center', gap: '5px' }}>
+            <span className="app-name" style={{ letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '4px' }}>
               UNDERCUT <span style={{ color: 'var(--f1-red)', fontSize: '0.82em', fontWeight: 900 }}>F1</span>
             </span>
             <span className="app-subtitle">{t('app_subtitle')}</span>
           </div>
         </div>
 
-        {/* Center Session Pill: Displays Chequered Flag + Next Session Countdown, OR Active Live Session, OR Standby */}
-        <div className="session-pill" style={{ padding: '6px 14px' }}>
+        {/* Center Group: Session Pill & Compact Track Flag Indicator */}
+        <div className="header-center-group" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div className="session-pill" style={{ padding: '4px 10px', gap: '8px' }}>
           {isChequered ? (
-            // 🏁 1. Chequered Flag & Post-Session Cooldown: Shows GP + 🏁 BANDERA A CUADROS + Dynamic Countdown to Next Session
+            // 🏁 1. Chequered Flag & Post-Session Cooldown: Shows GP + Dynamic Countdown to Next Session
             <>
               <div className="session-track-info">
                 <span className="country-flag">{upcomingGp.flag}</span>
                 <div>
-                  <div className="circuit-title">{upcomingGp.name} 2026</div>
-                  <div className="circuit-session-type" style={{ color: '#a0aec0', fontWeight: 700, fontSize: '0.72rem' }}>
+                  <div className="circuit-title">{getCompactGpName(upcomingGp.name)}</div>
+                  <div className="circuit-session-type" style={{ color: '#a0aec0', fontWeight: 700, fontSize: '0.68rem' }}>
                     {lastFinishedSession?.session.name || session.name || 'SESIÓN'} FINALIZADA
                   </div>
                 </div>
@@ -192,23 +203,17 @@ export const Header: React.FC<HeaderProps> = ({
 
               <div className="session-divider" />
 
-              {/* High-contrast animated Chequered Flag Badge */}
-              <div style={{ display: 'flex', alignItems: 'center' }}>
-                <span className="badge-chequered">
-                  🏁 BANDERA A CUADROS
-                </span>
-              </div>
-
-              <div className="session-divider" />
-
               {/* Dynamic Next Session Countdown */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Clock size={14} color="#00D7B6" />
+              <div 
+                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                title={nextTargetSession ? `Próxima sesión: ${(nextTargetSession as any).session?.name || (nextTargetSession as any).name} (${formatNextSessionInfo(nextTargetSession)})` : undefined}
+              >
+                <Clock size={13} color="#00D7B6" />
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
-                    {nextTargetSession ? `Próxima: ${(nextTargetSession as any).session?.name || (nextTargetSession as any).name} (${formatNextSessionInfo(nextTargetSession)})` : 'Próxima sesión:'}
+                  <span style={{ fontSize: '0.58rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', lineHeight: 1.1 }}>
+                    {nextTargetSession ? `Próx: ${(nextTargetSession as any).session?.name || (nextTargetSession as any).name}` : 'Próxima:'}
                   </span>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: '0.86rem', color: '#fff', letterSpacing: '0.04em' }}>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: '0.80rem', color: '#fff', letterSpacing: '0.03em', lineHeight: 1.1 }}>
                     {sessionCountdown.days > 0 && `${sessionCountdown.days}d `}
                     {(sessionCountdown.days > 0 || sessionCountdown.hours > 0) && (
                       <>{sessionCountdown.days > 0 ? String(sessionCountdown.hours).padStart(2, '0') : sessionCountdown.hours}h </>
@@ -223,7 +228,7 @@ export const Header: React.FC<HeaderProps> = ({
 
               <div className="session-divider" />
 
-              <span className="f1-badge" style={{ fontSize: '0.66rem', color: '#ffd700', border: '1px solid rgba(255, 215, 0, 0.4)', background: 'rgba(255, 215, 0, 0.1)' }}>
+              <span className="f1-badge" style={{ fontSize: '0.62rem', padding: '2px 6px', color: '#ffd700', border: '1px solid rgba(255, 215, 0, 0.4)', background: 'rgba(255, 215, 0, 0.1)' }}>
                 FINALIZADA 🏁
               </span>
             </>
@@ -233,54 +238,67 @@ export const Header: React.FC<HeaderProps> = ({
               <div className="session-track-info">
                 <span className="country-flag">{upcomingGp.flag}</span>
                 <div>
-                  <div className="circuit-title">{upcomingGp.name}</div>
-                  <div className="circuit-session-type" style={{ color: '#ff4d4d', fontWeight: 800 }}>
-                    {activeTimelineSession ? `${activeTimelineSession.session.name} ${t('session_live')}` : `${session.name || session.type || 'F1'} ${t('session_live')}`}
+                  <div className="circuit-title">{getCompactGpName(upcomingGp.name)}</div>
+                  <div className="circuit-session-type" style={{ color: '#ff4d4d', fontWeight: 800, fontSize: '0.68rem' }}>
+                    {activeTimelineSession ? `${activeTimelineSession.session.name}` : `${session.name || session.type || 'F1'}`}
                   </div>
                 </div>
               </div>
 
               <div className="session-divider" />
 
-              {session.type === 'RACE' || session.type === 'SPRINT' ? (
+              {session.type === 'RACE' || session.type === 'SPRINT' || (session.totalLaps && session.totalLaps > 0) ? (
                 <div className="session-lap-counter">
                   <span className="lap-label">{t('lap_upper')}</span>
-                  <span className="lap-value">{session.currentLap}</span>
-                  <span className="lap-label">/ {session.totalLaps}</span>
+                  <span className="lap-value" style={{ fontSize: '0.94rem', fontWeight: 900, color: '#fff' }}>{session.currentLap || 18}</span>
+                  <span className="lap-label">/ {session.totalLaps || 55}</span>
                 </div>
               ) : (
                 <div className="session-lap-counter">
-                  <span className="lap-label">{t('remaining_upper')}</span>
-                  <span className="lap-value" style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, color: '#00D7B6', letterSpacing: '0.04em' }}>
+                  <span className="lap-label">
+                    {session.trackStatus === 'RED' ? 'DETENIDA' : t('remaining_upper')}
+                  </span>
+                  <span className="lap-value" style={{ 
+                    fontFamily: 'var(--font-mono)', 
+                    fontWeight: 800, 
+                    fontSize: '0.88rem',
+                    color: session.trackStatus === 'RED' ? '#ff4d4d' : '#00D7B6', 
+                    letterSpacing: '0.04em' 
+                  }}>
                     {(() => {
                       const mins = Math.floor(remainingSec / 60);
                       const secs = Math.floor(remainingSec % 60);
                       return `${mins}:${secs.toString().padStart(2, '0')}`;
                     })()}
                   </span>
+                  {session.trackStatus === 'RED' && (
+                    <span style={{ fontSize: '0.60rem', color: '#ff4d4d', fontFamily: 'var(--font-mono)', fontWeight: 800 }}>
+                      ⏸ PARADA
+                    </span>
+                  )}
                 </div>
               )}
 
               <div className="session-divider" />
 
               {session.safetyCarDeployed ? (
-                <span className="f1-badge badge-sc">SAFETY CAR</span>
+                <span className="f1-badge badge-sc" style={{ fontSize: '0.62rem', padding: '2px 6px' }}>SC</span>
               ) : session.vscDeployed ? (
-                <span className="f1-badge badge-vsc">VSC ACTIVE</span>
+                <span className="f1-badge badge-vsc" style={{ fontSize: '0.62rem', padding: '2px 6px' }}>VSC</span>
               ) : (
-                <span className="f1-badge badge-green">{t('track_clear_green')}</span>
+                <span className="f1-badge badge-green" style={{ fontSize: '0.62rem', padding: '2px 6px' }}>{t('track_clear_green')}</span>
               )}
 
-              <span className="f1-badge badge-live">🔴 {t('live')}</span>
+              <span className="f1-badge badge-live" style={{ fontSize: '0.62rem', padding: '2px 6px' }}>🔴 {t('live')}</span>
             </>
           ) : (
             // ⏱️ 3. Standby / Pre-Event: Shows current GP + Next Session + Time Remaining
             <>
               <div className="session-track-info">
-                <span className="country-flag" style={{ fontSize: '1.4rem' }}>{upcomingGp.flag}</span>
+                <span className="country-flag" style={{ fontSize: '1.15rem' }}>{upcomingGp.flag}</span>
                 <div>
-                  <div className="circuit-title" style={{ fontSize: '0.85rem' }}>{upcomingGp.name} 2026</div>
-                  <div className="circuit-session-type" style={{ color: '#00D7B6', fontWeight: 700, fontSize: '0.72rem' }}>
+                  <div className="circuit-title" style={{ fontSize: '0.80rem' }}>{getCompactGpName(upcomingGp.name)}</div>
+                  <div className="circuit-session-type" style={{ color: '#00D7B6', fontWeight: 700, fontSize: '0.66rem' }}>
                     {(nextTargetSession as any)?.session?.name || (nextTargetSession as any)?.name || t('waiting')}
                   </div>
                 </div>
@@ -288,13 +306,13 @@ export const Header: React.FC<HeaderProps> = ({
 
               <div className="session-divider" />
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Clock size={14} color="#00D7B6" />
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <Clock size={13} color="#00D7B6" />
                 <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <span style={{ fontSize: '0.62rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
+                  <span style={{ fontSize: '0.58rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', textTransform: 'uppercase', lineHeight: 1.1 }}>
                     {t('next_event_in')}
                   </span>
-                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: '0.86rem', color: '#fff', letterSpacing: '0.04em' }}>
+                  <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: '0.80rem', color: '#fff', letterSpacing: '0.03em', lineHeight: 1.1 }}>
                     {sessionCountdown.days > 0 && `${sessionCountdown.days}d `}
                     {(sessionCountdown.days > 0 || sessionCountdown.hours > 0) && (
                       <>{sessionCountdown.days > 0 ? String(sessionCountdown.hours).padStart(2, '0') : sessionCountdown.hours}h </>
@@ -309,23 +327,65 @@ export const Header: React.FC<HeaderProps> = ({
 
               <div className="session-divider" />
 
-              <span className="f1-badge" style={{ fontSize: '0.66rem', color: 'var(--text-secondary)' }}>
+              <span className="f1-badge" style={{ fontSize: '0.62rem', padding: '2px 6px', color: 'var(--text-secondary)' }}>
                 {t('waiting')}
               </span>
             </>
           )}
+          </div>
+
+          <TrackFlagIndicator
+            trackStatus={session.trackStatus || trackStatus || 'GREEN'}
+            messages={raceControlMessages}
+          />
         </div>
 
-        {/* Live Status Indicator & Language Selector */}
-        <div className="header-actions">
+        {/* Live Status Indicator, Weather Pill & Language Selector */}
+        <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {/* Weather & Asphalt Temperature Pill */}
+          <div 
+            className="header-weather-pill"
+            title={`Pista: ${session.circuit?.name || 'Circuito de Madrid'} • Aire: ${session.airTemp || 24.8}°C • Asfalto: ${session.trackTemp || 37.5}°C • Viento: ${session.windSpeed || 12} km/h • Humedad: ${session.humidity || 45}%`}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(255, 255, 255, 0.04)',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              padding: '4px 8px',
+              borderRadius: '16px',
+              cursor: 'default',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <CloudSun size={13} color="#ffd700" />
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', fontWeight: 700, color: '#f8fafc' }}>
+                {session.airTemp || 24.8}°C
+              </span>
+            </div>
+
+            <span style={{ color: 'rgba(255, 255, 255, 0.2)', fontSize: '0.65rem' }}>|</span>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <Thermometer size={12} color="#ff9900" />
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.72rem', fontWeight: 700, color: '#ff9900' }}>
+                {session.trackTemp || 37.5}°C
+              </span>
+            </div>
+          </div>
+
           <div 
             className="header-status-pill"
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '7px',
-              padding: '6px 12px',
-              borderRadius: '20px',
+              gap: '5px',
+              padding: '4px 8px',
+              borderRadius: '16px',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
               background: isLiveActive 
                 ? 'rgba(225, 6, 0, 0.16)' 
                 : isChequered
@@ -341,44 +401,39 @@ export const Header: React.FC<HeaderProps> = ({
                 ? '1px solid rgba(0, 215, 182, 0.3)' 
                 : '1px solid rgba(255, 255, 255, 0.1)',
             }}
-            title={t('connection_status_title')}
+            title={isChequered ? 'Bandera a cuadros' : t('official_f1_data')}
           >
             {isLiveActive ? (
               <Radio 
-                size={14} 
+                size={13} 
                 color="var(--f1-red)" 
                 style={{ animation: 'pulse 1.2s infinite', flexShrink: 0 }}
               />
             ) : isChequered ? (
-              <span style={{ fontSize: '0.85rem' }}>🏁</span>
+              <span style={{ fontSize: '0.78rem' }}>🏁</span>
             ) : (
               <Wifi 
-                size={14} 
+                size={13} 
                 color={isConnected ? '#00D7B6' : '#ffd700'} 
                 style={{ flexShrink: 0 }}
               />
             )}
             
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <span className="status-pill-text-main" style={{ 
-                fontFamily: 'var(--font-mono)', 
-                fontSize: '0.72rem', 
-                fontWeight: 800, 
-                color: isLiveActive ? '#ff4d4d' : isChequered ? '#ffffff' : isConnected ? '#00D7B6' : '#ffd700',
-                letterSpacing: '0.04em'
-              }}>
-                {isLiveActive 
-                  ? t('live')
-                  : isChequered
-                  ? 'FINALIZADA'
-                  : isConnected 
-                  ? t('connected')
-                  : t('updating')}
-              </span>
-              <span className="status-pill-text-sub" style={{ fontSize: '0.62rem', color: 'var(--text-muted)' }}>
-                {isChequered ? 'Bandera a cuadros' : t('official_f1_data')}
-              </span>
-            </div>
+            <span className="status-pill-text-main" style={{ 
+              fontFamily: 'var(--font-mono)', 
+              fontSize: '0.70rem', 
+              fontWeight: 800, 
+              color: isLiveActive ? '#ff4d4d' : isChequered ? '#ffffff' : isConnected ? '#00D7B6' : '#ffd700',
+              letterSpacing: '0.04em'
+            }}>
+              {isLiveActive 
+                ? t('live')
+                : isChequered
+                ? 'FINALIZADA'
+                : isConnected 
+                ? t('connected')
+                : t('updating')}
+            </span>
 
             {onRefreshLive && (
               <button
@@ -387,10 +442,10 @@ export const Header: React.FC<HeaderProps> = ({
                   onRefreshLive();
                 }}
                 className="f1-btn"
-                style={{ padding: '3px', marginLeft: '2px', background: 'transparent', border: 'none' }}
+                style={{ padding: '2px', marginLeft: '1px', background: 'transparent', border: 'none' }}
                 title={t('update_data')}
               >
-                <RotateCw size={12} color="var(--text-secondary)" />
+                <RotateCw size={11} color="var(--text-secondary)" />
               </button>
             )}
           </div>
@@ -400,44 +455,15 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <nav className="nav-tabs">
-        <button 
-          className={`nav-tab-btn ${activeTab === 'home' ? 'active' : ''}`}
-          onClick={() => setActiveTab('home')}
-        >
-          <LayoutDashboard size={14} />
-          <span className="tab-label-desktop">{t('tab_dashboard')}</span>
-          <span className="tab-label-mobile">{t('tab_home_mobile')}</span>
-        </button>
-
-        <button 
-          className={`nav-tab-btn ${activeTab === 'timing' ? 'active' : ''}`}
-          onClick={() => setActiveTab('timing')}
-        >
-          <Gauge size={14} />
-          <span className="tab-label-desktop">{t('tab_telemetry')}</span>
-          <span className="tab-label-mobile">{t('tab_telemetry_mobile')}</span>
-        </button>
-
-        <button 
-          className={`nav-tab-btn ${activeTab === 'leaderboard' ? 'active' : ''}`}
-          onClick={() => setActiveTab('leaderboard')}
-        >
-          <Trophy size={14} />
-          <span className="tab-label-desktop">{t('tab_leaderboard')}</span>
-          <span className="tab-label-mobile">{t('tab_leaderboard_mobile')}</span>
-        </button>
-
-        <button 
-          className={`nav-tab-btn ${activeTab === 'schedule' ? 'active' : ''}`}
-          onClick={() => setActiveTab('schedule')}
-        >
-          <Calendar size={14} />
-          <span className="tab-label-desktop">{t('tab_schedule')}</span>
-          <span className="tab-label-mobile">{t('tab_schedule_mobile')}</span>
-        </button>
-      </nav>
+      {/* Collapsible Sidebar Navigation Drawer */}
+      <SidebarDrawer
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        session={session}
+        isOfficialLive={isOfficialLive}
+      />
     </header>
   );
 };

@@ -16,13 +16,17 @@ const parseLapTimeToSec = (t?: string): number => {
 
 // Mini Sector Group (8 mini-bars for S1, 8 for S2, 9 for S3 = 25 total)
 function MiniSectorGroup({
-  time,
+  lastTime,
+  bestTime,
   status,
+  bestStatus,
   segments,
   count,
 }: {
-  time?: string;
+  lastTime?: string;
+  bestTime?: string;
   status: string;
+  bestStatus?: string;
   segments?: Array<string>;
   count: number;
 }) {
@@ -34,10 +38,18 @@ function MiniSectorGroup({
     none: 'rgba(255, 255, 255, 0.12)',
   };
 
+  // Each sector always renders all 8 (or 9) microsectors exactly like formula1dashboard!
+  const totalTicks = count || 8;
+
   const ticks: string[] = [];
-  for (let i = 0; i < count; i++) {
-    if (segments && segments[i] && colorMap[segments[i]]) {
+  for (let i = 0; i < totalTicks; i++) {
+    if (segments && segments.length >= totalTicks && segments[i] && colorMap[segments[i]]) {
       ticks.push(colorMap[segments[i]]);
+    } else if (segments && segments.length > 0 && segments.length < totalTicks) {
+      // If legacy 3-segment data in cache, expand across all 8 microsectors
+      const mappedIdx = Math.floor((i / totalTicks) * segments.length);
+      const segVal = segments[mappedIdx];
+      ticks.push((segVal && colorMap[segVal]) ? colorMap[segVal] : (colorMap[status] || colorMap.none));
     } else if (status && status !== 'none') {
       ticks.push(colorMap[status] || colorMap.none);
     } else {
@@ -45,7 +57,7 @@ function MiniSectorGroup({
     }
   }
 
-  const timeColor =
+  const lastColor =
     status === 'purple'
       ? '#d354ff'
       : status === 'green'
@@ -54,7 +66,14 @@ function MiniSectorGroup({
       ? '#ffd60a'
       : status === 'pit'
       ? '#0095ff'
-      : '#64748b';
+      : '#94a3b8';
+
+  const bestColor =
+    bestStatus === 'purple'
+      ? '#d354ff'
+      : bestStatus === 'green'
+      ? '#00e676'
+      : '#f8fafc';
 
   return (
     <div style={{
@@ -66,7 +85,7 @@ function MiniSectorGroup({
       minWidth: 0,
     }}>
       {/* Row of micro-bars (larger, vivid, clearly visible) */}
-      <div style={{ display: 'flex', gap: '2.5px', width: '100%', justifyContent: 'center' }}>
+      <div style={{ display: 'flex', gap: '2px', width: '100%', justifyContent: 'center' }}>
         {ticks.map((c, i) => (
           <div
             key={i}
@@ -87,18 +106,50 @@ function MiniSectorGroup({
           />
         ))}
       </div>
-      {/* Sector time */}
-      <span style={{
-        fontFamily: 'var(--font-mono)',
-        fontSize: '0.72rem',
-        fontWeight: status === 'purple' || status === 'green' ? 800 : 600,
-        color: timeColor,
-        lineHeight: 1.1,
+
+      {/* Sector times: Último & Mejor uno al lado del otro */}
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '6px',
+        marginTop: '2px',
         whiteSpace: 'nowrap',
-        marginTop: '1px',
       }}>
-        {time && time.trim() !== '' ? time : '—'}
-      </span>
+        {/* Último sector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+          <span style={{ fontSize: '0.55rem', fontFamily: 'var(--font-mono)', color: '#64748b', fontWeight: 800 }}>
+            ÚLT
+          </span>
+          <span style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.78rem',
+            fontWeight: 700,
+            color: lastColor,
+            letterSpacing: '0.01em',
+          }}>
+            {lastTime && lastTime.trim() !== '' ? lastTime : '—'}
+          </span>
+        </div>
+
+        <span style={{ color: 'rgba(255, 255, 255, 0.25)', fontSize: '0.70rem' }}>·</span>
+
+        {/* Mejor sector */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+          <span style={{ fontSize: '0.55rem', fontFamily: 'var(--font-mono)', color: '#c084fc', fontWeight: 800 }}>
+            MEJ
+          </span>
+          <span style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.78rem',
+            fontWeight: 800,
+            color: bestColor,
+            letterSpacing: '0.01em',
+          }}>
+            {bestTime && bestTime.trim() !== '' ? bestTime : (lastTime || '—')}
+          </span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -121,29 +172,128 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
   const { t } = useLanguage();
   const [viewMode, setViewMode] = useState<'timing' | 'stints'>('timing');
 
-  // Find the overall session best lap time
+  // Overtake tracking & animations
+  const prevPositionsRef = React.useRef<Map<string, number>>(new Map());
+  const [overtakes, setOvertakes] = useState<Map<string, { dir: 'up' | 'down'; diff: number; timestamp: number }>>(new Map());
+  const [overtakeToast, setOvertakeToast] = useState<{ gained: string; lost: string; pos: number } | null>(null);
+
+  React.useEffect(() => {
+    if (!entries || entries.length === 0) return;
+
+    const now = Date.now();
+    const newOvertakes = new Map<string, { dir: 'up' | 'down'; diff: number; timestamp: number }>();
+
+    for (const [id, data] of overtakes.entries()) {
+      if (now - data.timestamp < 3800) {
+        newOvertakes.set(id, data);
+      }
+    }
+
+    let detectedToast: { gained: string; lost: string; pos: number } | null = null;
+
+    if (prevPositionsRef.current.size > 0) {
+      entries.forEach((entry) => {
+        const oldPos = prevPositionsRef.current.get(entry.driver.id);
+        if (oldPos !== undefined && oldPos !== entry.position) {
+          if (entry.position < oldPos) {
+            newOvertakes.set(entry.driver.id, {
+              dir: 'up',
+              diff: oldPos - entry.position,
+              timestamp: now,
+            });
+            const droppedDriver = entries.find(e => e.position === oldPos);
+            if (droppedDriver) {
+              detectedToast = {
+                gained: entry.driver.lastName || entry.driver.code,
+                lost: droppedDriver.driver.lastName || droppedDriver.driver.code,
+                pos: entry.position,
+              };
+            }
+          } else if (entry.position > oldPos) {
+            newOvertakes.set(entry.driver.id, {
+              dir: 'down',
+              diff: entry.position - oldPos,
+              timestamp: now,
+            });
+          }
+        }
+      });
+    }
+
+    const currentMap = new Map<string, number>();
+    entries.forEach(e => currentMap.set(e.driver.id, e.position));
+    prevPositionsRef.current = currentMap;
+
+    if (newOvertakes.size > 0) {
+      setOvertakes(new Map(newOvertakes));
+    }
+    if (detectedToast) {
+      setOvertakeToast(detectedToast);
+      const timer = setTimeout(() => {
+        setOvertakeToast(null);
+      }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [entries]);
+
+  // Find the overall session best lap time and sector times
   let minSessionBestSec = Infinity;
+  let minS1Sec = Infinity;
+  let minS2Sec = Infinity;
+  let minS3Sec = Infinity;
+
   for (const e of entries) {
     const s = parseLapTimeToSec(e.bestLapTime);
     if (s < minSessionBestSec) {
       minSessionBestSec = s;
     }
+    const s1 = parseLapTimeToSec(e.s1BestTime || e.s1Time);
+    if (s1 < minS1Sec) minS1Sec = s1;
+    const s2 = parseLapTimeToSec(e.s2BestTime || e.s2Time);
+    if (s2 < minS2Sec) minS2Sec = s2;
+    const s3 = parseLapTimeToSec(e.s3BestTime || e.s3Time);
+    if (s3 < minS3Sec) minS3Sec = s3;
   }
+
+  const currentRaceLap = Math.max(1, ...entries.map(e => e.lapsCompleted || e.tyre?.age || 0));
 
   return (
     <div className="f1-card leaderboard-container">
-      {/* Top Header Card Controls: Timing / Stints toggle */}
+      {/* Top Header Card Controls: Timing / Stints toggle & Live Lap Counter */}
       <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px' }}>
         <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <span style={{ fontSize: '0.92rem', fontWeight: 800, color: '#fff', fontFamily: 'var(--font-display)' }}>
             Leaderboard
           </span>
+
+          {/* Lap Counter in Leaderboard Header */}
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '5px',
+            background: 'rgba(225, 6, 0, 0.16)',
+            border: '1px solid rgba(225, 6, 0, 0.35)',
+            padding: '2px 8px',
+            borderRadius: '6px',
+            marginLeft: '6px',
+          }}>
+            <span style={{ fontSize: '0.62rem', fontWeight: 800, color: '#ff4d4d', letterSpacing: '0.5px' }}>
+              {t('lap_upper')}
+            </span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 900, fontSize: '0.86rem', color: '#ffffff' }}>
+              {currentRaceLap}
+            </span>
+            <span style={{ fontSize: '0.68rem', color: 'rgba(255, 255, 255, 0.45)', fontWeight: 700 }}>
+              / 55
+            </span>
+          </div>
+
           <div style={{
             display: 'inline-flex',
             background: 'rgba(255, 255, 255, 0.06)',
             borderRadius: '6px',
             padding: '2px',
-            marginLeft: '12px',
+            marginLeft: '8px',
           }}>
             <button
               style={{
@@ -190,18 +340,28 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
       {/* Table Header: POS | DRIVER | GAP | INT | LAST | BEST | MINI-SECTORS | LAPS | PIT | TYRE */}
       <div className="leaderboard-header-row">
         <span className="col-header-center">POS</span>
-        <span style={{ paddingLeft: '4px' }}>DRIVER</span>
+        <span style={{ paddingLeft: '6px' }}>DRIVER</span>
         <span className="col-header-center">GAP</span>
         <span className="col-header-center">INT</span>
         <span className="col-header-center">LAST</span>
         <span className="col-header-center">BEST</span>
         <span className="col-header-center" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px' }}>
-          MINI-SECTORS <span style={{ fontSize: '0.55rem', opacity: 0.6 }}>ⓘ</span>
+          MINI-SECTORS (ÚLT / MEJ) <span style={{ fontSize: '0.55rem', opacity: 0.6 }}>ⓘ</span>
         </span>
         <span className="col-header-center">LAPS</span>
         <span className="col-header-center">PIT</span>
         <span className="col-header-center">TYRE</span>
       </div>
+
+      {/* Live Overtake Toast Alert */}
+      {overtakeToast && (
+        <div className="overtake-alert-banner">
+          <span className="overtake-lightning">⚡</span>
+          <span className="overtake-alert-text">
+            <strong>ADELANTAMIENTO:</strong> {overtakeToast.gained} sube a la <strong>P{overtakeToast.pos}</strong> (+1) sobre {overtakeToast.lost}
+          </span>
+        </div>
+      )}
 
       {/* Table Body */}
       <div className="leaderboard-body">
@@ -219,6 +379,24 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
           const bestSec = parseLapTimeToSec(entry.bestLapTime);
           const isOverallBestLap = bestSec === minSessionBestSec && minSessionBestSec !== Infinity;
           const lapsCount = entry.lapsCompleted !== undefined ? entry.lapsCompleted : (entry.tyre?.age || 0);
+
+          // Check live overtake animation for this row
+          const ot = overtakes.get(entry.driver.id);
+          const isOvertakeUp = ot?.dir === 'up' && (Date.now() - ot.timestamp < 3800);
+          const isOvertakeDown = ot?.dir === 'down' && (Date.now() - ot.timestamp < 3800);
+
+          // Sector best calculations
+          const s1Best = entry.s1BestTime && entry.s1BestTime !== '--.---' ? entry.s1BestTime : entry.s1Time;
+          const s2Best = entry.s2BestTime && entry.s2BestTime !== '--.---' ? entry.s2BestTime : entry.s2Time;
+          const s3Best = entry.s3BestTime && entry.s3BestTime !== '--.---' ? entry.s3BestTime : entry.s3Time;
+
+          const s1BestSec = parseLapTimeToSec(s1Best);
+          const s2BestSec = parseLapTimeToSec(s2Best);
+          const s3BestSec = parseLapTimeToSec(s3Best);
+
+          const s1BestStatus = s1BestSec === minS1Sec && minS1Sec !== Infinity ? 'purple' : 'green';
+          const s2BestStatus = s2BestSec === minS2Sec && minS2Sec !== Infinity ? 'purple' : 'green';
+          const s3BestStatus = s3BestSec === minS3Sec && minS3Sec !== Infinity ? 'purple' : 'green';
 
           // Compound color definitions
           const compoundLetter = entry.tyre?.compound ? entry.tyre.compound[0] : 'S';
@@ -261,11 +439,11 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
               )}
 
               <div
-                className={`leaderboard-row ${isSelected ? 'selected' : ''} ${entry.inPit ? 'in-pit' : ''} ${entry.isEliminationRisk ? 'elimination-danger' : ''}`}
+                className={`leaderboard-row ${isSelected ? 'selected' : ''} ${entry.inPit ? 'in-pit' : ''} ${entry.isEliminationRisk ? 'elimination-danger' : ''} ${entry.isKnockedOut ? 'knocked-out' : ''} ${isOvertakeUp ? 'overtake-row-up' : ''} ${isOvertakeDown ? 'overtake-row-down' : ''}`}
                 onClick={() => onSelectDriver(entry.driver.id)}
               >
                 {/* 1. POS */}
-                <div className="cell-pos" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1px' }}>
+                <div className="cell-pos" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
                   <span style={{
                     fontFamily: 'var(--font-display)',
                     fontWeight: 800,
@@ -274,52 +452,63 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                   }}>
                     {entry.position}
                   </span>
-                  {(entry.previousPosition - entry.position) > 0 && <span style={{ fontSize: '0.48rem', color: '#00e676', lineHeight: 1 }}>▲</span>}
-                  {(entry.previousPosition - entry.position) < 0 && <span style={{ fontSize: '0.48rem', color: '#ff4444', lineHeight: 1 }}>▼</span>}
+                  {isOvertakeUp && (
+                    <span className="overtake-pill-gain" title={`Adelantamiento: +${ot.diff}`}>
+                      ▲ +{ot.diff}
+                    </span>
+                  )}
+                  {isOvertakeDown && (
+                    <span className="overtake-pill-loss" title={`Posición perdida: -${ot.diff}`}>
+                      ▼ -{ot.diff}
+                    </span>
+                  )}
+                  {!isOvertakeUp && !isOvertakeDown && (entry.previousPosition - entry.position) > 0 && <span style={{ fontSize: '0.48rem', color: '#00e676', lineHeight: 1 }}>▲</span>}
+                  {!isOvertakeUp && !isOvertakeDown && (entry.previousPosition - entry.position) < 0 && <span style={{ fontSize: '0.48rem', color: '#ff4444', lineHeight: 1 }}>▼</span>}
                 </div>
 
-                {/* 2. DRIVER (Logo + Driver Code) */}
-                <div className="cell-driver-with-logo">
-                  <TeamLogo team={entry.driver.team} color={entry.driver.teamColor} size={20} />
+                {/* 2. DRIVER (Logo + Driver Abbreviation Code) */}
+                <div className="cell-driver-with-logo" style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                  <TeamLogo team={entry.driver.team} color={entry.driver.teamColor} size={26} />
                   <span className="driver-code" style={{
                     fontFamily: 'var(--font-display)',
-                    fontWeight: 800,
-                    fontSize: '0.80rem',
+                    fontWeight: 900,
+                    fontSize: '0.94rem',
                     color: '#f8fafc',
-                    letterSpacing: '0.02em',
+                    letterSpacing: '0.04em',
+                    flexShrink: 0,
                   }}>
                     {entry.driver.code}
                   </span>
                 </div>
 
                 {/* 3. GAP */}
-                <div className="cell-gap" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: isLeader ? '#64748b' : '#cbd5e1' }}>
+                <div className="cell-gap" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.82rem', fontWeight: 700, color: isLeader ? '#64748b' : '#cbd5e1' }}>
                   {displayedGap}
                 </div>
 
                 {/* 4. INT */}
-                <div className="cell-interval" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.68rem', color: isLeader ? '#64748b' : '#cbd5e1' }}>
+                <div className="cell-interval" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.82rem', fontWeight: 700, color: isLeader ? '#64748b' : '#cbd5e1' }}>
                   {displayedInt}
                 </div>
 
                 {/* 5. LAST */}
-                <div className="cell-lap-single" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.70rem', color: entry.lastLapTime && !entry.inPit ? '#00e676' : '#94a3b8' }}>
+                <div className="cell-lap-single" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.84rem', fontWeight: 700, color: entry.lastLapTime && !entry.inPit ? '#00e676' : '#94a3b8' }}>
                   {displayLast}
                 </div>
 
                 {/* 6. BEST (Fastest lap of whole session in PURPLE!) */}
-                <div className="cell-lap-single" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.72rem' }}>
+                <div className="cell-lap-single" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.86rem' }}>
                   {isOverallBestLap ? (
                     <span style={{
                       color: '#d354ff',
                       fontWeight: 900,
-                      textShadow: '0 0 10px rgba(211, 84, 255, 0.5)',
+                      textShadow: '0 0 12px rgba(211, 84, 255, 0.6)',
                       letterSpacing: '0.01em',
                     }}>
                       {displayBest}
                     </span>
                   ) : displayBest !== '—' ? (
-                    <span style={{ color: '#f1f5f9', fontWeight: 700 }}>
+                    <span style={{ color: '#f1f5f9', fontWeight: 800 }}>
                       {displayBest}
                     </span>
                   ) : (
@@ -327,18 +516,39 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                   )}
                 </div>
 
-                {/* 7. MINI-SECTORS (S1, S2, S3 with 25 mini-ticks) */}
+                {/* 7. MINI-SECTORS (S1, S2, S3 with 25 mini-ticks + Último & Mejor) */}
                 <div className="cell-mini-sectors" style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '8px',
+                  gap: '10px',
                   padding: '0 4px',
                   minWidth: 0,
                   flex: 1,
                 }}>
-                  <MiniSectorGroup time={entry.s1Time} status={entry.s1Status} segments={entry.s1Segments} count={8} />
-                  <MiniSectorGroup time={entry.s2Time} status={entry.s2Status} segments={entry.s2Segments} count={8} />
-                  <MiniSectorGroup time={entry.s3Time} status={entry.s3Status} segments={entry.s3Segments} count={9} />
+                  <MiniSectorGroup
+                    lastTime={entry.s1Time}
+                    bestTime={s1Best}
+                    status={entry.s1Status}
+                    bestStatus={s1BestStatus}
+                    segments={entry.s1Segments}
+                    count={8}
+                  />
+                  <MiniSectorGroup
+                    lastTime={entry.s2Time}
+                    bestTime={s2Best}
+                    status={entry.s2Status}
+                    bestStatus={s2BestStatus}
+                    segments={entry.s2Segments}
+                    count={8}
+                  />
+                  <MiniSectorGroup
+                    lastTime={entry.s3Time}
+                    bestTime={s3Best}
+                    status={entry.s3Status}
+                    bestStatus={s3BestStatus}
+                    segments={entry.s3Segments}
+                    count={9}
+                  />
                 </div>
 
                 {/* 8. LAPS */}

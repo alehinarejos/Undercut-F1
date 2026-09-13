@@ -15,33 +15,46 @@
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   border-bottom: 1px solid var(--f1-border);
-  padding: 10px 24px;
+  padding: 6px 16px;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .header-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  flex-wrap: wrap;
+  gap: 8px;
+  flex-wrap: nowrap !important;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 .brand-section {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.header-center-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .f1-logo-badge {
   display: flex;
   align-items: center;
   background: var(--f1-red);
-  padding: 4px 10px;
+  padding: 3px 7px;
   border-radius: 4px;
   font-family: var(--font-display);
   font-weight: 900;
-  font-size: 1.15rem;
-  letter-spacing: -0.04em;
+  font-size: 0.95rem;
+  letter-spacing: -0.02em;
   color: #fff;
   box-shadow: var(--f1-red-shadow);
   user-select: none;
@@ -54,60 +67,74 @@
 
 .app-name {
   font-family: var(--font-display);
-  font-size: 1.1rem;
+  font-size: 0.95rem;
   font-weight: 800;
   letter-spacing: 0.04em;
   color: var(--text-highlight);
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .app-subtitle {
   font-family: var(--font-mono);
-  font-size: 0.68rem;
+  font-size: 0.60rem;
   font-weight: 600;
   color: var(--text-muted);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
+  white-space: nowrap;
+}
+
+@media (max-width: 1440px) {
+  .app-subtitle {
+    display: none;
+  }
 }
 
 /* Session Info Center Pill */
 .session-pill {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 8px;
   background: var(--f1-surface);
   border: 1px solid var(--f1-border);
-  padding: 6px 16px;
-  border-radius: 30px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  flex-shrink: 1;
+  min-width: 0;
+  white-space: nowrap;
 }
 
 .session-track-info {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .country-flag {
-  font-size: 1.25rem;
+  font-size: 1.15rem;
 }
 
 .circuit-title {
   font-family: var(--font-display);
-  font-size: 0.88rem;
+  font-size: 0.80rem;
   font-weight: 700;
   color: #fff;
+  white-space: nowrap;
 }
 
 .circuit-session-type {
   font-family: var(--font-mono);
-  font-size: 0.75rem;
+  font-size: 0.68rem;
   font-weight: 600;
   color: var(--f1-red);
+  white-space: nowrap;
 }
 
 .session-divider {
   width: 1px;
-  height: 22px;
+  height: 16px;
   background: var(--f1-border);
+  flex-shrink: 0;
 }
 
 .session-lap-counter {
@@ -164,7 +191,8 @@
 .header-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 /* Navigation Tabs */
@@ -221,59 +249,85 @@
 /* Main Content Area */
 .main-content {
   flex: 1;
-  padding: 12px 18px;
+  padding: 10px 18px 16px 18px;
   max-width: 100%;
   margin: 0 auto;
   width: 100%;
   box-sizing: border-box;
 }
 
-/* Grid Layout for Live Timing Dashboard: 80% Leaderboard / 20% Right sidebar */
-.telemetry-layout-grid,
+/* Grid Layout for Live Timing Dashboard: exact full height of the leaderboard table */
+.telemetry-layout-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3.8fr) minmax(290px, 1.2fr);
+  align-items: stretch !important;
+  gap: 14px;
+  height: auto !important;
+  max-height: none !important;
+  min-height: fit-content !important;
+  overflow: visible !important;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .dashboard-grid {
   display: grid;
   grid-template-columns: minmax(0, 4fr) minmax(260px, 1fr);
   align-items: stretch;
   gap: 14px;
-  height: calc(100vh - 120px);
-  max-height: calc(100vh - 120px);
-  min-height: 560px;
-  overflow: hidden;
+  height: auto;
+  min-height: 680px;
+  overflow: visible;
   width: 100%;
   box-sizing: border-box;
 }
 
-/* Left Panel: Tabla de tiempos (Full height, 80% width) */
-.telemetry-left-panel,
-.grid-col-leaderboard {
+/* Left Panel: Tabla de tiempos (Full height, sin scroll interno) */
+.telemetry-left-panel {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
+  height: 100% !important;
+  min-height: fit-content !important;
+  overflow: visible !important;
   width: 100%;
 }
 
-.telemetry-left-panel .leaderboard-container,
-.grid-col-leaderboard .leaderboard-container {
-  height: 100%;
+.grid-col-leaderboard {
+  display: flex;
+  flex-direction: column;
+  height: auto;
   min-height: 0;
-  flex: 1;
-  overflow: hidden;
+  overflow: visible;
+  width: 100%;
+}
+
+.telemetry-left-panel .leaderboard-container {
+  height: 100% !important;
+  min-height: fit-content !important;
+  overflow: visible !important;
   display: flex;
   flex-direction: column;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
 }
 
-/* Right Panel: Top (Benchmarks) + Middle (Race Control) + Bottom (Fastest by Sector) */
+.grid-col-leaderboard .leaderboard-container {
+  height: auto;
+  min-height: 0;
+  flex: 1;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+}
+
+/* Right Panel: Exactly matches the full height of the leaderboard table */
 .telemetry-right-panel {
   display: flex;
   flex-direction: column;
   gap: 12px;
   height: 100%;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
+  box-sizing: border-box;
+  overflow: hidden;
   padding-right: 2px;
 }
 

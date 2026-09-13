@@ -1,7 +1,8 @@
 import { decode, encode } from 'cbor-x';
 import { inflateRaw } from 'pako';
-import type { LeaderboardEntry, SectorStatus, TyreCompound } from '../types/telemetry';
+import type { LeaderboardEntry, SectorStatus, TyreCompound, RaceControlMessage } from '../types/telemetry';
 import { DRIVERS } from '../data/drivers';
+import { standingsSyncService } from './standingsSyncService';
 
 export interface LiveCarTelemetry {
   driverNumber: number;
@@ -99,6 +100,9 @@ export interface F1LiveSessionStatus {
   remainingSec?: number;
   isFinished: boolean;
   isChequered: boolean;
+  isRedFlag?: boolean;
+  isExtrapolating?: boolean;
+  isStopped?: boolean;
   trackStatus?: string;
   safetyCar?: boolean;
   vsc?: boolean;
@@ -112,6 +116,7 @@ export class F1LiveWebSocketService {
   private listeners = new Set<(entries: LeaderboardEntry[]) => void>();
   private sessionStatusListeners = new Set<(status: F1LiveSessionStatus) => void>();
   private carDataListeners = new Set<(carData: Map<number, LiveCarTelemetry>) => void>();
+  private raceControlListeners = new Set<(msg: RaceControlMessage) => void>();
 
   // In-memory state cache
   private cachedTimingLines: Map<string, RawF1TimingLine> = new Map();
@@ -140,6 +145,13 @@ export class F1LiveWebSocketService {
     fn({ ...this.currentSessionStatus });
     return () => {
       this.sessionStatusListeners.delete(fn);
+    };
+  }
+
+  public subscribeRaceControl(fn: (msg: RaceControlMessage) => void): () => void {
+    this.raceControlListeners.add(fn);
+    return () => {
+      this.raceControlListeners.delete(fn);
     };
   }
 
@@ -283,6 +295,9 @@ export class F1LiveWebSocketService {
       if (msg.R.TrackStatus) {
         this.processTrackStatus(msg.R.TrackStatus);
       }
+      if (msg.R.RaceControlMessages) {
+        this.processRaceControlMessages(msg.R.RaceControlMessages);
+      }
       if (msg.R.DriverList) {
         this.processDriverList(msg.R.DriverList);
       }
@@ -320,6 +335,8 @@ export class F1LiveWebSocketService {
           this.processSessionInfo(data);
         } else if (topic === 'TrackStatus') {
           this.processTrackStatus(data);
+        } else if (topic === 'RaceControlMessages') {
+          this.processRaceControlMessages(data);
         } else if (topic === 'CarData.z' || topic === 'CarData') {
           this.processCarDataZ(data);
         }
@@ -448,6 +465,10 @@ export class F1LiveWebSocketService {
         isFinished,
         isChequered: isFinished,
       };
+
+      if (isFinished && !this.currentSessionStatus.isFinished) {
+        standingsSyncService.triggerRaceFinished();
+      }
       this.notifySessionStatus();
     }
   }
@@ -455,6 +476,7 @@ export class F1LiveWebSocketService {
   private processExtrapolatedClock(data: any): void {
     if (!data || typeof data !== 'object') return;
     const remainingStr = data.Remaining;
+    const isExtrapolating = data.Extrapolating !== false;
     let remainingSec = 0;
     if (remainingStr && typeof remainingStr === 'string') {
       const parts = remainingStr.split(':').map(Number);
@@ -465,10 +487,14 @@ export class F1LiveWebSocketService {
       }
     }
     const isFinished = remainingStr === '00:00:00' || this.currentSessionStatus.sessionStatus === 'Finished';
+    const isRedFlag = this.currentSessionStatus.trackStatus === '5';
+    const isStopped = !isExtrapolating || isRedFlag;
     this.currentSessionStatus = {
       ...this.currentSessionStatus,
       remaining: remainingStr,
       remainingSec,
+      isExtrapolating,
+      isStopped,
       isFinished,
       isChequered: isFinished,
     };
@@ -478,13 +504,100 @@ export class F1LiveWebSocketService {
   private processTrackStatus(data: any): void {
     if (!data || typeof data !== 'object') return;
     const code = String(data.Status || '');
+    const isRedFlag = code === '5';
     this.currentSessionStatus = {
       ...this.currentSessionStatus,
       trackStatus: code,
       safetyCar: code === '4',
       vsc: code === '6',
+      isRedFlag,
+      isStopped: isRedFlag || (this.currentSessionStatus.isExtrapolating === false),
     };
     this.notifySessionStatus();
+  }
+
+  private translateRaceControlMessage(text: string): string {
+    const t = text.toUpperCase();
+    if (t.includes('CLEAR IN TRACK SECTOR')) {
+      return text.replace(/CLEAR IN TRACK SECTOR\s*([0-9]+)/i, 'PISTA DESPEJADA EN SECTOR $1');
+    }
+    if (t.includes('DOUBLE YELLOW IN TRACK SECTOR')) {
+      return text.replace(/DOUBLE YELLOW IN TRACK SECTOR\s*([0-9]+)/i, 'DOBLE BANDERA AMARILLA EN SECTOR $1');
+    }
+    if (t.includes('YELLOW IN TRACK SECTOR')) {
+      return text.replace(/YELLOW IN TRACK SECTOR\s*([0-9]+)/i, 'BANDERA AMARILLA EN SECTOR $1');
+    }
+    if (t.includes('TRACK LIMITS')) {
+      return text.replace(/LAP DELETED - TRACK LIMITS AT TURN\s*([0-9]+)/i, 'VUELTA ANULADA - LÍMITES DE PISTA EN CURVA $1')
+                 .replace(/TRACK LIMITS AT TURN\s*([0-9]+)/i, 'LÍMITES DE PISTA EN CURVA $1');
+    }
+    if (t.includes('SAFETY CAR DEPLOYED')) return 'SAFETY CAR DESPLEGADO EN PISTA';
+    if (t.includes('VIRTUAL SAFETY CAR DEPLOYED')) return 'SAFETY CAR VIRTUAL DESPLEGADO';
+    if (t.includes('VIRTUAL SAFETY CAR ENDING')) return 'SAFETY CAR VIRTUAL FINALIZANDO';
+    if (t.includes('RED FLAG')) return 'BANDERA ROJA - SESIÓN DETENIDA';
+    if (t.includes('CHEQUERED FLAG')) return 'BANDERA A CUADROS - SESIÓN FINALIZADA';
+    if (t.includes('PIT EXIT OPEN')) return 'SALIDA DE PIT LANE ABIERTA';
+    if (t.includes('PIT ENTRY CLOSED')) return 'ENTRADA DE PIT LANE CERRADA';
+    if (t.includes('DRS ENABLED')) return 'DRS ACTIVADO';
+    if (t.includes('DRS DISABLED')) return 'DRS DESACTIVADO';
+    return text;
+  }
+
+  private processRaceControlMessages(data: any): void {
+    if (!data) return;
+    const rawList: any[] = Array.isArray(data.Messages) 
+      ? data.Messages 
+      : Array.isArray(data) 
+      ? data 
+      : typeof data === 'object' 
+      ? Object.values(data) 
+      : [];
+
+    for (const item of rawList) {
+      if (!item || typeof item !== 'object' || !item.Message) continue;
+      const rawText = String(item.Message || '');
+      const flagStr = String(item.Flag || '').toUpperCase();
+      const catStr = String(item.Category || 'Flag');
+
+      let flag: RaceControlMessage['flag'] = 'GREEN';
+      if (flagStr.includes('DOUBLE') || rawText.toUpperCase().includes('DOUBLE YELLOW')) {
+        flag = 'DOUBLE_YELLOW';
+      } else if (flagStr.includes('YELLOW') || rawText.toUpperCase().includes('YELLOW')) {
+        flag = 'YELLOW';
+      } else if (flagStr.includes('RED') || rawText.toUpperCase().includes('RED FLAG')) {
+        flag = 'RED';
+      } else if (flagStr.includes('CHEQUERED') || rawText.toUpperCase().includes('CHEQUERED')) {
+        flag = 'CHEQUERED';
+      } else if (flagStr.includes('CLEAR') || rawText.toUpperCase().includes('CLEAR')) {
+        flag = 'GREEN';
+      }
+
+      let category: RaceControlMessage['category'] = 'FLAG';
+      const upper = rawText.toUpperCase();
+      if (upper.includes('SAFETY CAR') || catStr === 'SafetyCar') category = 'SAFETY_CAR';
+      else if (upper.includes('DELETED') || upper.includes('TRACK LIMITS')) category = 'INCIDENT';
+      else if (upper.includes('PIT')) category = 'PIT_LANE';
+      else if (upper.includes('RAIN') || upper.includes('WEATHER')) category = 'WEATHER';
+
+      const timeStr = item.Utc 
+        ? new Date(item.Utc).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        : new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+      const parsed: RaceControlMessage = {
+        id: `rc-ws-${item.Utc || Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        timestamp: timeStr,
+        flag,
+        scope: item.Scope || 'Track',
+        sector: item.Sector ? Number(item.Sector) : undefined,
+        driverNumber: item.RacingNumber ? Number(item.RacingNumber) : undefined,
+        messageEn: rawText,
+        messageEs: this.translateRaceControlMessage(rawText),
+        category,
+      };
+
+      // Notify immediately!
+      this.raceControlListeners.forEach(fn => fn(parsed));
+    }
   }
 
   private processDriverList(data: any): void {
@@ -740,13 +853,13 @@ export class F1LiveWebSocketService {
     return 'none';
   }
 
-  private resolveSegments(rawSegs: any, fallback: SectorStatus): SectorStatus[] {
+  private resolveSegments(rawSegs: any, _fallback?: SectorStatus): SectorStatus[] {
     if (!rawSegs) {
-      return [fallback, fallback, fallback];
+      return [];
     }
     const segList: any[] = Array.isArray(rawSegs) ? rawSegs : Object.values(rawSegs);
     if (segList.length === 0) {
-      return [fallback, fallback, fallback];
+      return [];
     }
 
     const mapped = segList.map(s => {
@@ -758,15 +871,7 @@ export class F1LiveWebSocketService {
       return 'none' as SectorStatus;
     });
 
-    // Sample 3 segments for the 3-bar indicator
-    if (mapped.length <= 3) {
-      while (mapped.length < 3) mapped.push(fallback);
-      return mapped;
-    }
-    const i1 = 0;
-    const i2 = Math.floor(mapped.length / 2);
-    const i3 = mapped.length - 1;
-    return [mapped[i1], mapped[i2], mapped[i3]];
+    return mapped;
   }
 
   private parseLapTimeToSeconds(timeStr?: string): number {

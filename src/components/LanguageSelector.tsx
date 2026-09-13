@@ -25,18 +25,20 @@ export const LanguageSelector: React.FC = () => {
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: '7px',
+          gap: '5px',
           background: 'rgba(255, 255, 255, 0.05)',
           border: '1px solid rgba(255, 255, 255, 0.12)',
-          borderRadius: '20px',
-          padding: '6px 12px',
+          borderRadius: '16px',
+          padding: '4px 8px',
           color: '#fff',
           cursor: 'pointer',
           fontFamily: 'var(--font-mono)',
-          fontSize: '0.76rem',
+          fontSize: '0.72rem',
           fontWeight: 700,
           letterSpacing: '0.04em',
           transition: 'all 0.2s ease',
+          whiteSpace: 'nowrap',
+          flexShrink: 0,
         }}
         onMouseEnter={(e) => {
           e.currentTarget.style.borderColor = 'rgba(225, 6, 0, 0.5)';
@@ -49,11 +51,11 @@ export const LanguageSelector: React.FC = () => {
         title="Cambiar idioma / Switch language"
         aria-label="Language selector"
       >
-        <Globe size={14} color="#00D7B6" />
-        <span style={{ fontSize: '1.05rem', lineHeight: 1 }}>{currentLanguageOption.flag}</span>
+        <Globe size={13} color="#00D7B6" />
+        <span style={{ fontSize: '0.95rem', lineHeight: 1 }}>{currentLanguageOption.flag}</span>
         <span style={{ textTransform: 'uppercase' }}>{currentLanguageOption.code}</span>
         <ChevronDown 
-          size={12} 
+          size={11} 
           color="var(--text-muted)" 
           style={{ 
             transition: 'transform 0.2s ease',

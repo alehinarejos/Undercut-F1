@@ -139,23 +139,13 @@ class OfficialLiveTimingSyncService {
   }
 
   /**
-   * Map official segments array into a 3-bar microsector array
+   * Map official segments array into full microsector array
    */
-  private extractSegments(rawSegments?: Array<{ Status?: number }>, fallbackStatus: SectorStatus = 'none'): SectorStatus[] {
+  private extractSegments(rawSegments?: Array<{ Status?: number }>, _fallbackStatus: SectorStatus = 'none'): SectorStatus[] {
     if (!rawSegments || rawSegments.length === 0) {
-      return [fallbackStatus, fallbackStatus, fallbackStatus];
+      return [];
     }
-    // Official F1 usually provides 6 to 8 segments per sector; sample 3 key segments for the UI
-    const mapped = rawSegments.map(s => this.mapSegmentStatus(s?.Status));
-    if (mapped.length <= 3) {
-      while (mapped.length < 3) mapped.push(fallbackStatus);
-      return mapped;
-    }
-    // Sample beginning, middle, and end of the sector
-    const i1 = 0;
-    const i2 = Math.floor(mapped.length / 2);
-    const i3 = mapped.length - 1;
-    return [mapped[i1], mapped[i2], mapped[i3]];
+    return rawSegments.map(s => this.mapSegmentStatus(s?.Status));
   }
 
   /**

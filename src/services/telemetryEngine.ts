@@ -8,7 +8,8 @@ import type {
   PitPrediction,
   TelemetryComparisonPoint,
   TrackStatus,
-  TyreCompound
+  TyreCompound,
+  SectorStatus
 } from '../types/telemetry';
 import { DRIVERS } from '../data/drivers';
 import { CIRCUITS, CIRCUIT_MAP } from '../data/circuits';
@@ -148,6 +149,8 @@ export class TelemetryEngine {
   private liveCarDataMap = new Map<number, LiveCarTelemetry>();
   private hasLiveCarData: boolean = false;
   private lastLiveCarDataTime: number = 0;
+  private rcEventTimer: number = 0;
+  private lastOvertakeTime: number = Date.now();
 
   // Live dynamic sector and lap tracking state per driver
   private driverLiveSectors = new Map<string, {
@@ -202,23 +205,16 @@ export class TelemetryEngine {
     const madridCircuit = CIRCUIT_MAP.get('madrid') || CIRCUITS[0];
     this.circuit = madridCircuit;
 
-    const fp1Start = new Date('2026-09-11T11:30:00Z').getTime();
-    const fp1End = new Date('2026-09-11T12:30:00Z').getTime();
-    const now = Date.now();
-    let remainingSec = 3600;
-    if (now >= fp1Start && now <= fp1End) {
-      remainingSec = Math.max(0, Math.floor((fp1End - now) / 1000));
-    }
 
     this.session = {
       id: 'session-2026-r16-madrid',
       circuit: madridCircuit,
-      type: 'PRACTICE',
+      type: 'RACE',
       name: 'Gran Premio de España 2026 (Madrid)',
       trackStatus: 'GREEN',
-      currentLap: 0,
-      totalLaps: 0, // Libres/Practice session: 0 total laps (timed session)
-      timeRemainingSec: remainingSec,
+      currentLap: 18,
+      totalLaps: 55, // Madrid GP: 55 laps (5.474 km x 55 = 301.07 km)
+      timeRemainingSec: 0,
       airTemp: 24.8,
       trackTemp: 37.5,
       humidity: 36,
@@ -380,9 +376,15 @@ export class TelemetryEngine {
           s1Time: s1,
           s2Time: s2,
           s3Time: s3,
+          s1BestTime: s1,
+          s2BestTime: s2,
+          s3BestTime: s3,
           s1Status: idx === 0 ? 'purple' : idx < 3 ? 'green' : 'yellow',
           s2Status: idx === 1 ? 'purple' : idx < 4 ? 'green' : 'yellow',
           s3Status: idx === 0 ? 'purple' : idx < 3 ? 'green' : 'yellow',
+          s1Segments: this.buildInitialSegments(8, idx === 0 ? 'purple' : idx < 3 ? 'green' : 'yellow'),
+          s2Segments: this.buildInitialSegments(8, idx === 1 ? 'purple' : idx < 4 ? 'green' : 'yellow'),
+          s3Segments: this.buildInitialSegments(9, idx === 0 ? 'purple' : idx < 3 ? 'green' : 'yellow'),
           tyre: {
             compound: idx === 2 || idx === 6 ? 'MEDIUM' : idx === 7 ? 'HARD' : 'SOFT',
             age: tyreAge,
@@ -396,7 +398,7 @@ export class TelemetryEngine {
           speedTrap: speedTraps[idx] || 345,
           lastLapTimeNum: baseSec,
           trackProgress: initialProgressMap[idx] !== undefined ? initialProgressMap[idx] : (1.0 - idx * 0.04 + 1.0) % 1.0,
-          lapsCompleted: tyreAge,
+          lapsCompleted: idx >= 17 ? 17 : 18,
         };
       });
     }
@@ -424,21 +426,81 @@ export class TelemetryEngine {
     this.raceControlLog = [
       {
         id: 'rc-mad-1',
-        timestamp: '13:15:00',
+        timestamp: '17:21:05',
         flag: 'GREEN',
-        scope: 'Track',
-        messageEn: 'TRACK CLEAR - FP1 AT CIRCUITO DE MADRID (MADRING)',
-        messageEs: 'PISTA DESPEJADA - FP1 EN CIRCUITO DE MADRID (MADRING)',
-        category: 'SYSTEM',
+        scope: 'Sector 5',
+        messageEn: 'CLEAR IN TRACK SECTOR 5',
+        messageEs: 'PISTA DESPEJADA EN SECTOR 5',
+        category: 'FLAG',
       },
       {
         id: 'rc-mad-2',
-        timestamp: '13:18:00',
+        timestamp: '17:20:41',
+        flag: 'YELLOW',
+        scope: 'Sector 22',
+        messageEn: 'YELLOW IN TRACK SECTOR 22',
+        messageEs: 'BANDERA AMARILLA EN SECTOR 22',
+        category: 'FLAG',
+      },
+      {
+        id: 'rc-mad-3',
+        timestamp: '17:19:12',
+        scope: 'Track',
+        messageEn: 'CAR 43 (COL) LAP DELETED - TRACK LIMITS AT TURN 5 LAP 18 (PIT)',
+        messageEs: 'COCHE 43 (COL) VUELTA ANULADA - LÍMITES DE PISTA EN CURVA 5 (PIT)',
+        category: 'TRACK_LIMITS',
+      },
+      {
+        id: 'rc-mad-4',
+        timestamp: '17:18:00',
+        flag: 'GREEN',
+        scope: 'Pit Lane',
+        messageEn: 'PIT EXIT OPEN',
+        messageEs: 'SALIDA DE PIT LANE ABIERTA',
+        category: 'FLAG',
+      },
+      {
+        id: 'rc-mad-5',
+        timestamp: '17:15:30',
+        scope: 'Track',
+        messageEn: 'RISK OF RAIN FOR F1 SESSION IS 0%',
+        messageEs: 'RIESGO DE LLUVIA PARA LA SESIÓN DE F1 ES 0%',
+        category: 'SYSTEM',
+      },
+      {
+        id: 'rc-mad-6',
+        timestamp: '17:12:08',
+        flag: 'DOUBLE_YELLOW',
+        scope: 'Sector 14',
+        messageEn: 'DOUBLE YELLOW IN TRACK SECTOR 14',
+        messageEs: 'DOBLE BANDERA AMARILLA EN SECTOR 14',
+        category: 'FLAG',
+      },
+      {
+        id: 'rc-mad-7',
+        timestamp: '17:10:44',
+        scope: 'Track',
+        messageEn: 'CAR 30 (LAW) LAP DELETED - TRACK LIMITS AT TURN 9 LAP 14',
+        messageEs: 'COCHE 30 (LAW) VUELTA ANULADA - LÍMITES DE PISTA EN CURVA 9',
+        category: 'TRACK_LIMITS',
+      },
+      {
+        id: 'rc-mad-8',
+        timestamp: '17:05:00',
         flag: 'GREEN',
         scope: 'Track',
-        messageEn: 'FIA INSPECTION COMPLETE - SURFACE DRY, ALL 20 TURNS OPERATIONAL',
-        messageEs: 'INSPECCIÓN FIA COMPLETADA - PISTA SECA, 20 CURVAS OPERATIVAS',
-        category: 'SYSTEM',
+        messageEn: 'DRS ENABLED IN SECTORS 1 AND 2',
+        messageEs: 'DRS ACTIVADO EN SECTORES 1 Y 2',
+        category: 'DRS',
+      },
+      {
+        id: 'rc-mad-9',
+        timestamp: '17:00:00',
+        flag: 'GREEN',
+        scope: 'Track',
+        messageEn: 'TRACK CLEAR - GREEN FLAG FOR FP1 AT CIRCUITO DE MADRID',
+        messageEs: 'PISTA DESPEJADA - BANDERA VERDE PARA FP1 EN MADRID',
+        category: 'FLAG',
       },
     ];
 
@@ -977,6 +1039,9 @@ export class TelemetryEngine {
         existing.s1Time = newEntry.s1Time;
         existing.s2Time = newEntry.s2Time;
         existing.s3Time = newEntry.s3Time;
+        if (newEntry.s1BestTime) existing.s1BestTime = newEntry.s1BestTime;
+        if (newEntry.s2BestTime) existing.s2BestTime = newEntry.s2BestTime;
+        if (newEntry.s3BestTime) existing.s3BestTime = newEntry.s3BestTime;
         existing.s1Status = newEntry.s1Status;
         existing.s2Status = newEntry.s2Status;
         existing.s3Status = newEntry.s3Status;
@@ -1041,15 +1106,16 @@ export class TelemetryEngine {
     if (s1Time < this.sessionBestS1) {
       this.sessionBestS1 = s1Time;
       entry.s1Status = 'purple';
-      entry.s1Segments = ['purple', 'purple', 'purple'];
+      entry.s1Segments = ['purple', 'purple', 'purple', 'purple', 'green', 'purple', 'purple', 'purple'];
     } else if (s1Time <= state.personalBestS1) {
       state.personalBestS1 = s1Time;
       entry.s1Status = 'green';
-      entry.s1Segments = ['green', 'green', 'green'];
+      entry.s1Segments = ['green', 'green', 'green', 'purple', 'green', 'green', 'green', 'green'];
     } else {
       entry.s1Status = 'yellow';
-      entry.s1Segments = ['yellow', 'yellow', 'green'];
+      entry.s1Segments = ['yellow', 'yellow', 'green', 'yellow', 'yellow', 'yellow', 'green', 'yellow'];
     }
+    entry.s1BestTime = state.personalBestS1 ? state.personalBestS1.toFixed(3) : entry.s1Time;
   }
 
   private handleSector2Crossed(entry: LeaderboardEntry, _idx: number) {
@@ -1066,15 +1132,16 @@ export class TelemetryEngine {
     if (s2Time < this.sessionBestS2) {
       this.sessionBestS2 = s2Time;
       entry.s2Status = 'purple';
-      entry.s2Segments = ['purple', 'purple', 'purple'];
+      entry.s2Segments = ['purple', 'purple', 'purple', 'purple', 'purple', 'green', 'purple', 'purple'];
     } else if (s2Time <= state.personalBestS2) {
       state.personalBestS2 = s2Time;
       entry.s2Status = 'green';
-      entry.s2Segments = ['green', 'green', 'green'];
+      entry.s2Segments = ['green', 'green', 'purple', 'green', 'green', 'green', 'green', 'green'];
     } else {
       entry.s2Status = 'yellow';
-      entry.s2Segments = ['yellow', 'green', 'yellow'];
+      entry.s2Segments = ['yellow', 'green', 'yellow', 'yellow', 'yellow', 'green', 'yellow', 'yellow'];
     }
+    entry.s2BestTime = state.personalBestS2 ? state.personalBestS2.toFixed(3) : entry.s2Time;
   }
 
   private handleLapCompleted(entry: LeaderboardEntry, _idx: number) {
@@ -1090,15 +1157,16 @@ export class TelemetryEngine {
     if (s3Time < this.sessionBestS3) {
       this.sessionBestS3 = s3Time;
       entry.s3Status = 'purple';
-      entry.s3Segments = ['purple', 'purple', 'purple'];
+      entry.s3Segments = ['purple', 'purple', 'purple', 'purple', 'purple', 'purple', 'green', 'purple', 'purple'];
     } else if (s3Time <= state.personalBestS3) {
       state.personalBestS3 = s3Time;
       entry.s3Status = 'green';
-      entry.s3Segments = ['green', 'green', 'green'];
+      entry.s3Segments = ['green', 'green', 'green', 'purple', 'green', 'green', 'green', 'green', 'green'];
     } else {
       entry.s3Status = 'yellow';
-      entry.s3Segments = ['yellow', 'yellow', 'green'];
+      entry.s3Segments = ['yellow', 'yellow', 'green', 'yellow', 'yellow', 'yellow', 'green', 'yellow', 'yellow'];
     }
+    entry.s3BestTime = state.personalBestS3 ? state.personalBestS3.toFixed(3) : entry.s3Time;
 
     const s1 = state.currentS1 || 29.25;
     const s2 = state.currentS2 || 33.75;
@@ -1124,6 +1192,68 @@ export class TelemetryEngine {
         localStorage.setItem('f1_live_leaderboard', serialized);
         localStorage.setItem('f1_saved_leaderboard_madrid', serialized);
       } catch {}
+    }
+  }
+
+  private buildInitialSegments(count: number, status: SectorStatus): SectorStatus[] {
+    const res: SectorStatus[] = [];
+    for (let i = 0; i < count; i++) {
+      if (status === 'purple') {
+        res.push(i % 6 === 1 ? 'green' : 'purple');
+      } else if (status === 'green') {
+        res.push(i % 5 === 2 ? 'purple' : i % 5 === 0 ? 'yellow' : 'green');
+      } else {
+        res.push(i % 4 === 1 ? 'green' : 'yellow');
+      }
+    }
+    return res;
+  }
+
+  private updateEntryMicrosectors(entry: LeaderboardEntry, progress: number) {
+    const s1Len = 0.3333;
+    const s2Len = 0.3333;
+    const s1Micro = s1Len / 8;
+    const s2Micro = s2Len / 8;
+    const s3Micro = 0.3334 / 9;
+
+    const baseColor: SectorStatus = entry.position <= 2 ? 'purple' : entry.position <= 8 ? 'green' : 'yellow';
+
+    if (progress < s1Len) {
+      // S1: each microsector 0..7 lights up progressively
+      const activeIdx = Math.min(7, Math.floor(progress / s1Micro));
+      const segs: SectorStatus[] = [];
+      for (let i = 0; i < 8; i++) {
+        if (i <= activeIdx) {
+          segs.push((entry.position === 1 && i % 3 !== 1) ? 'purple' : (i % 3 === 0 && entry.position <= 4) ? 'purple' : baseColor);
+        } else {
+          segs.push('none');
+        }
+      }
+      entry.s1Segments = segs;
+    } else if (progress < s1Len + s2Len) {
+      // S2: each microsector 0..7 lights up progressively
+      const activeIdx = Math.min(7, Math.floor((progress - s1Len) / s2Micro));
+      const segs: SectorStatus[] = [];
+      for (let i = 0; i < 8; i++) {
+        if (i <= activeIdx) {
+          segs.push((entry.position <= 2 && i % 2 === 0) ? 'purple' : baseColor);
+        } else {
+          segs.push('none');
+        }
+      }
+      entry.s2Segments = segs;
+    } else {
+      // S3: each microsector 0..8 lights up progressively
+      const activeIdx = Math.min(8, Math.floor((progress - (s1Len + s2Len)) / s3Micro));
+      const segs: SectorStatus[] = [];
+      for (let i = 0; i < 9; i++) {
+        if (i <= activeIdx) {
+          segs.push((entry.position === 1 && i % 2 === 0) ? 'purple' : baseColor);
+        } else {
+          segs.push('none');
+        }
+      }
+      entry.s3Segments = segs;
     }
   }
 
@@ -1276,49 +1406,208 @@ export class TelemetryEngine {
       messageEs: this.session.safetyCarDeployed ? 'SAFETY CAR DESPLEGADO EN PISTA' : 'SAFETY CAR ENTRA EN ESTA VUELTA - PISTA DESPEJADA',
       category: 'SAFETY_CAR',
     };
+    this.addRaceControlMessage(msg);
+  }
+
+  public addRaceControlMessage(msg: RaceControlMessage) {
     this.raceControlLog.unshift(msg);
+    if (this.raceControlLog.length > 50) {
+      this.raceControlLog.pop();
+    }
     this.listeners.onRaceControlMessage?.(msg);
   }
 
-  public triggerVSC() {
-    this.session.vscDeployed = !this.session.vscDeployed;
-    this.session.safetyCarDeployed = false;
-    this.session.trackStatus = this.session.vscDeployed ? 'VSC' : 'GREEN';
-
+  public triggerRedFlag() {
+    this.session.trackStatus = this.session.trackStatus === 'RED' ? 'GREEN' : 'RED';
+    const isRed = this.session.trackStatus === 'RED';
     const msg: RaceControlMessage = {
       id: `rc-${Date.now()}`,
       timestamp: this.getCurrentTimeString(),
-      flag: this.session.vscDeployed ? 'YELLOW' : 'GREEN',
+      flag: isRed ? 'RED' : 'GREEN',
       scope: 'Track',
-      messageEn: this.session.vscDeployed ? 'VIRTUAL SAFETY CAR DEPLOYED - REDUCE SPEED' : 'VIRTUAL SAFETY CAR ENDING',
-      messageEs: this.session.vscDeployed ? 'SAFETY CAR VIRTUAL DESPLEGADO - REDUZCA LA VELOCIDAD' : 'FINALIZA EL SAFETY CAR VIRTUAL',
-      category: 'SAFETY_CAR',
+      messageEn: isRed ? 'RED FLAG - SESSION SUSPENDED' : 'GREEN FLAG - TRACK CLEAR, SESSION RESUMED',
+      messageEs: isRed ? 'BANDERA ROJA - SESIÓN DETENIDA' : 'BANDERA VERDE - PISTA DESPEJADA, SESIÓN REANUDADA',
+      category: 'FLAG',
     };
-    this.raceControlLog.unshift(msg);
-    this.listeners.onRaceControlMessage?.(msg);
+    this.addRaceControlMessage(msg);
   }
 
-  public triggerRandomRadio() {
-    const randomTemplate = RECORDED_MONZA_RADIOS[Math.floor(Math.random() * RECORDED_MONZA_RADIOS.length)];
-    const newRadio: TeamRadio = {
-      ...randomTemplate,
-      id: `tr-${Date.now()}`,
+  private maybeGenerateRaceControlEvent(dt: number) {
+    if (this.isLiveMode || this.hasLiveOfficialData || this.sessionEnded) return;
+    this.rcEventTimer += dt;
+    if (this.rcEventTimer < 25) return;
+    this.rcEventTimer = 0;
+
+    const rand = Math.random();
+    if (rand < 0.40) {
+      const targetDriver = this.leaderboard[Math.floor(Math.random() * Math.min(12, this.leaderboard.length))];
+      if (targetDriver) {
+        const turn = [4, 5, 9, 10, 14, 15][Math.floor(Math.random() * 6)];
+        const msg: RaceControlMessage = {
+          id: `rc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          timestamp: this.getCurrentTimeString(),
+          flag: 'GREEN',
+          scope: 'Track',
+          driverNumber: targetDriver.driver.number,
+          messageEn: `CAR ${targetDriver.driver.number} (${targetDriver.driver.code}) LAP DELETED - TRACK LIMITS AT TURN ${turn} LAP ${this.session.currentLap || 14}`,
+          messageEs: `COCHE ${targetDriver.driver.number} (${targetDriver.driver.code}) VUELTA ANULADA - LÍMITES DE PISTA EN CURVA ${turn} (VUELTA ${this.session.currentLap || 14})`,
+          category: 'INCIDENT',
+        };
+        this.addRaceControlMessage(msg);
+      }
+    } else if (rand < 0.70) {
+      const sec = [1, 2, 3][Math.floor(Math.random() * 3)];
+      const trackSec = sec === 1 ? Math.floor(Math.random() * 6 + 1) : sec === 2 ? Math.floor(Math.random() * 8 + 9) : Math.floor(Math.random() * 6 + 17);
+      const msgYellow: RaceControlMessage = {
+        id: `rc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        timestamp: this.getCurrentTimeString(),
+        flag: 'YELLOW',
+        scope: `Sector ${sec}`,
+        sector: sec,
+        messageEn: `YELLOW IN TRACK SECTOR ${trackSec}`,
+        messageEs: `BANDERA AMARILLA EN SECTOR ${trackSec}`,
+        category: 'FLAG',
+      };
+      this.session.trackStatus = 'YELLOW';
+      this.addRaceControlMessage(msgYellow);
+
+      setTimeout(() => {
+        if (this.session.trackStatus === 'YELLOW') {
+          this.session.trackStatus = 'GREEN';
+          const msgClear: RaceControlMessage = {
+            id: `rc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+            timestamp: this.getCurrentTimeString(),
+            flag: 'GREEN',
+            scope: `Sector ${sec}`,
+            sector: sec,
+            messageEn: `CLEAR IN TRACK SECTOR ${trackSec} - TRACK CLEAR`,
+            messageEs: `PISTA DESPEJADA EN SECTOR ${trackSec}`,
+            category: 'FLAG',
+          };
+          this.addRaceControlMessage(msgClear);
+        }
+      }, 8000);
+    } else if (rand < 0.85) {
+      const msg: RaceControlMessage = {
+        id: `rc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        timestamp: this.getCurrentTimeString(),
+        flag: 'GREEN',
+        scope: 'PitLane',
+        messageEn: 'PIT EXIT OPEN',
+        messageEs: 'SALIDA DE PIT LANE ABIERTA',
+        category: 'PIT_LANE',
+      };
+      this.addRaceControlMessage(msg);
+    } else {
+      const msg: RaceControlMessage = {
+        id: `rc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        timestamp: this.getCurrentTimeString(),
+        flag: 'GREEN',
+        scope: 'Track',
+        messageEn: 'DRS ENABLED IN SECTORS 1 AND 2',
+        messageEs: 'DRS ACTIVADO EN SECTORES 1 Y 2',
+        category: 'FLAG',
+      };
+      this.addRaceControlMessage(msg);
+    }
+  }
+
+  /**
+   * Simulate realistic overtaking maneuvers during a race
+   */
+  private maybePerformOvertake() {
+    const isLive = this.isLiveMode || this.hasLiveOfficialData;
+    if (isLive || this.session.type !== 'RACE' || this.sessionEnded || this.session.trackStatus === 'CHEQUERED' || this.session.trackStatus === 'RED') {
+      return;
+    }
+
+    const now = Date.now();
+    // Trigger overtake every 12 to 18 seconds
+    if (now - this.lastOvertakeTime < 14000) {
+      return;
+    }
+
+    // Identify battling pairs in the midfield / lead pack
+    const eligibleIndices: number[] = [];
+    for (let i = 1; i < Math.min(16, this.leaderboard.length); i++) {
+      const chaser = this.leaderboard[i];
+      const defender = this.leaderboard[i - 1];
+      if (chaser && defender && !chaser.inPit && !defender.inPit) {
+        eligibleIndices.push(i);
+      }
+    }
+
+    if (eligibleIndices.length === 0) return;
+
+    const swapIdx = eligibleIndices[Math.floor(Math.random() * eligibleIndices.length)];
+    const chaser = this.leaderboard[swapIdx];
+    const defender = this.leaderboard[swapIdx - 1];
+    if (!chaser || !defender) return;
+
+    this.lastOvertakeTime = now;
+
+    // Swap positions
+    const newPos = defender.position;
+    const oldPos = chaser.position;
+    chaser.position = newPos;
+    defender.position = oldPos;
+
+    // Reorder in leaderboard array
+    this.leaderboard[swapIdx - 1] = chaser;
+    this.leaderboard[swapIdx] = defender;
+
+    // Adjust racing intervals
+    chaser.intervalNum = 0.285;
+    defender.intervalNum = 0.395;
+    chaser.gapToAhead = `+${chaser.intervalNum.toFixed(3)}s`;
+    defender.gapToAhead = `+${defender.intervalNum.toFixed(3)}s`;
+
+    // Emit Race Control overtake message
+    const turns = [1, 4, 10, 12, 16, 20];
+    const turn = turns[Math.floor(Math.random() * turns.length)];
+    const overtakeMsg: RaceControlMessage = {
+      id: `rc-ot-${Date.now()}`,
       timestamp: this.getCurrentTimeString(),
+      flag: 'GREEN',
+      scope: 'Track',
+      messageEn: `OVERTAKE - CAR ${chaser.driver.number} (${chaser.driver.code}) OVERTOOK CAR ${defender.driver.number} (${defender.driver.code}) FOR P${newPos} AT TURN ${turn}`,
+      messageEs: `ADELANTAMIENTO - COCHE ${chaser.driver.number} (${chaser.driver.code}) ADELANTÓ A COCHE ${defender.driver.number} (${defender.driver.code}) POR LA P${newPos} EN CURVA ${turn}`,
+      category: 'INCIDENT',
+      lap: this.session.currentLap || 18,
     };
-    this.teamRadioLog.unshift(newRadio);
-    this.listeners.onTeamRadio?.(newRadio);
+    this.addRaceControlMessage(overtakeMsg);
+
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('f1_live_leaderboard', JSON.stringify(this.leaderboard));
+      } catch {}
+    }
   }
 
   private tick() {
     const dt = (0.060 * this.playbackSpeed); // delta time scaled
 
-    // Decrement practice/qualifying session time remaining
-    if (this.session.type === 'PRACTICE' || this.session.type === 'QUALIFYING') {
+    // Stop clock if session is red flagged, finished, or paused
+    const isSessionStopped = 
+      this.sessionEnded || 
+      this.session.trackStatus === 'RED' || 
+      this.session.trackStatus === 'CHEQUERED';
+
+    if (!isSessionStopped && (this.session.type === 'PRACTICE' || this.session.type === 'QUALIFYING')) {
       if (this.session.timeRemainingSec > 0) {
         this.session.timeRemainingSec = Math.max(0, this.session.timeRemainingSec - dt);
         if (this.session.timeRemainingSec === 0 && !this.sessionEnded) {
           this.sessionEnded = true;
           this.session.trackStatus = 'CHEQUERED';
+          this.addRaceControlMessage({
+            id: `rc-${Date.now()}`,
+            timestamp: this.getCurrentTimeString(),
+            flag: 'CHEQUERED',
+            scope: 'Track',
+            messageEn: 'CHEQUERED FLAG - SESSION FINISHED',
+            messageEs: 'BANDERA A CUADROS - SESIÓN FINALIZADA',
+            category: 'FLAG',
+          });
         }
       } else {
         this.session.trackStatus = 'CHEQUERED';
@@ -1326,7 +1615,9 @@ export class TelemetryEngine {
       }
     }
 
-    const isSessionStopped = this.sessionEnded || this.session.trackStatus === 'CHEQUERED';
+    // Dynamic Race Control message generation during active simulation
+    this.maybeGenerateRaceControlEvent(dt);
+    this.maybePerformOvertake();
 
     // Update car positions & physics
     this.leaderboard.forEach((entry, idx) => {
@@ -1427,6 +1718,10 @@ export class TelemetryEngine {
       }
 
       entry.trackProgress = newProgress;
+
+      if (!isLive && !entry.inPit) {
+        this.updateEntryMicrosectors(entry, newProgress);
+      }
 
       // Calculate car telemetry based on exact physical state at this point on track
       const telemetry = this.calculateTelemetryForProgress(entry.driver.id, newProgress, entry.inPit);

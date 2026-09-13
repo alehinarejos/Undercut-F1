@@ -212,6 +212,25 @@ export const translations = {
     remaining_upper: 'RESTANTE',
     track_clear_green: 'PISTA VERDE',
     connection_status_title: 'Estado de conexión oficial',
+
+    // Home Dashboard (formula1dashboard.com style)
+    season_badge: 'Temporada 2026',
+    schedule_card_title: 'Calendario 2026',
+    fastest_pit_stop_title: 'Pit Stop más Rápido 2026',
+    crash_damage_title: 'Costes Totales por Daños 2026',
+    used_elements_title: 'Componentes de Motor Usados 2026',
+    tech_upgrades_title: 'Mejoras Técnicas Totales 2026',
+    vs_previous_round: 'vs ronda anterior',
+    stay_connected_title: '¡Mantente conectado!',
+    stay_connected_desc: 'Síguenos en tu red social favorita para las últimas novedades y datos de F1.',
+    new_liveries_title: 'Nuevas Decoraciones',
+    home_driver_standings: 'Mundial de Pilotos 2026',
+    home_constructor_standings: 'Mundial de Constructores 2026',
+    full_driver_standings_btn: 'Ver Clasificación Completa de Pilotos →',
+    full_constructor_standings_btn: 'Ver Clasificación Completa de Constructores →',
+    stats_and_records_title: 'Estadísticas y Récords 2026',
+    filter_all_badge: 'Todo',
+    season_completed_label: '{pct}% de la temporada completada',
   },
 
   en: {
@@ -411,6 +430,25 @@ export const translations = {
     remaining_upper: 'REMAINING',
     track_clear_green: 'TRACK CLEAR',
     connection_status_title: 'Official connection status',
+
+    // Home Dashboard (formula1dashboard.com style)
+    season_badge: 'Season 2026',
+    schedule_card_title: '2026 Schedule',
+    fastest_pit_stop_title: '2026 Fastest Pit Stop',
+    crash_damage_title: '2026 Crash Damage Total Costs',
+    used_elements_title: '2026 Total Used Elements',
+    tech_upgrades_title: '2026 Total Tech Upgrades',
+    vs_previous_round: 'vs previous round',
+    stay_connected_title: 'Stay connected!',
+    stay_connected_desc: 'Follow us on your favorite social network for the latest Dashboard updates and F1 insights.',
+    new_liveries_title: 'New Liveries',
+    home_driver_standings: '2026 Driver Standings',
+    home_constructor_standings: '2026 Constructor Standings',
+    full_driver_standings_btn: 'Full 2026 Driver Standings →',
+    full_constructor_standings_btn: 'Full 2026 Constructor Standings →',
+    stats_and_records_title: '2026 Stats & Records',
+    filter_all_badge: 'All',
+    season_completed_label: '{pct}% of season completed',
   },
 
   fr: {
@@ -610,6 +648,25 @@ export const translations = {
     remaining_upper: 'RESTANT',
     track_clear_green: 'PISTE VERTE',
     connection_status_title: 'Statut de connexion officiel',
+
+    // Home Dashboard (formula1dashboard.com style)
+    season_badge: 'Saison 2026',
+    schedule_card_title: 'Calendrier 2026',
+    fastest_pit_stop_title: 'Arrêt au Stand le Plus Rapide 2026',
+    crash_damage_title: 'Coûts Totaux des Dégâts 2026',
+    used_elements_title: 'Éléments de Moteur Utilisés 2026',
+    tech_upgrades_title: 'Évolutions Techniques Totales 2026',
+    vs_previous_round: 'vs manche précédente',
+    stay_connected_title: 'Restez connectés !',
+    stay_connected_desc: 'Suivez-nous sur votre réseau social préféré pour les dernières actualités F1.',
+    new_liveries_title: 'Nouvelles Livrées',
+    home_driver_standings: 'Championnat Pilotes 2026',
+    home_constructor_standings: 'Championnat Constructeurs 2026',
+    full_driver_standings_btn: 'Voir le Classement Pilotes Complet →',
+    full_constructor_standings_btn: 'Voir le Classement Constructeurs Complet →',
+    stats_and_records_title: 'Statistiques et Records 2026',
+    filter_all_badge: 'Tout',
+    season_completed_label: '{pct}% de la saison terminée',
   },
 
   it: {
@@ -809,6 +866,25 @@ export const translations = {
     remaining_upper: 'RIMANENTE',
     track_clear_green: 'PISTA VERDE',
     connection_status_title: 'Stato di connessione ufficiale',
+
+    // Home Dashboard (formula1dashboard.com style)
+    season_badge: 'Stagione 2026',
+    schedule_card_title: 'Calendario 2026',
+    fastest_pit_stop_title: 'Pit Stop più Veloce 2026',
+    crash_damage_title: 'Costi Totali Danni da Incidente 2026',
+    used_elements_title: 'Elementi Power Unit Utilizzati 2026',
+    tech_upgrades_title: 'Aggiornamenti Tecnici Totali 2026',
+    vs_previous_round: 'vs round precedente',
+    stay_connected_title: 'Resta connesso!',
+    stay_connected_desc: 'Seguici sui tuoi social network preferiti per gli ultimi aggiornamenti e dati F1.',
+    new_liveries_title: 'Nuove Livree',
+    home_driver_standings: 'Campionato Piloti 2026',
+    home_constructor_standings: 'Campionato Costruttori 2026',
+    full_driver_standings_btn: 'Visualizza Classifica Piloti Completa →',
+    full_constructor_standings_btn: 'Visualizza Classifica Costruttori Completa →',
+    stats_and_records_title: 'Statistiche e Record 2026',
+    filter_all_badge: 'Tutto',
+    season_completed_label: '{pct}% della stagione completata',
   },
 };
 

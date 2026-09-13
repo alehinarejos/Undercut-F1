@@ -34,6 +34,7 @@ export interface F1SignalRListeners {
   onWeatherData?: (weather: F1WeatherData) => void;
   onRaceControl?: (message: any) => void;
   onSessionInfo?: (sessionInfo: any) => void;
+  onClock?: (clockData: any) => void;
 }
 
 export class F1SignalRClient {
@@ -190,6 +191,9 @@ export class F1SignalRClient {
           'WeatherData',
           'RaceControlMessages',
           'SessionInfo',
+          'SessionData',
+          'SessionClock',
+          'ExtrapolatedClock',
           'DriverList',
           'TeamRadio',
           'LapCount',
@@ -281,7 +285,12 @@ export class F1SignalRClient {
               standingsSyncService.triggerRaceFinished();
             }
           }
-          this.listeners.onRaceControl?.(data);
+          this.handleRaceControl(data);
+          break;
+
+        case 'ExtrapolatedClock':
+        case 'SessionClock':
+          this.listeners.onClock?.(data);
           break;
 
         case 'SessionInfo':
@@ -356,6 +365,23 @@ export class F1SignalRClient {
       windDirection: parseFloat(data.WindDirection || 0),
       rainfall: Boolean(data.Rainfall === '1' || data.Rainfall === true),
     });
+  }
+
+  private handleRaceControl(data: any) {
+    if (!data) return;
+    const rawList: any[] = Array.isArray(data.Messages) 
+      ? data.Messages 
+      : Array.isArray(data) 
+      ? data 
+      : typeof data === 'object' && !data.Message
+      ? Object.values(data) 
+      : [data];
+
+    for (const item of rawList) {
+      if (item && typeof item === 'object') {
+        this.listeners.onRaceControl?.(item);
+      }
+    }
   }
 
   public disconnect() {
