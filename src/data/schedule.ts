@@ -365,7 +365,9 @@ export const F1_SCHEDULE: GrandPrixEvent[] = [
     circuitId: 'madrid',
     startDate: '2026-09-11',
     endDate: '2026-09-13',
-    completed: false, // NEXT GP - TOMORROW!
+    completed: true,
+    winner: 'M. Verstappen (Red Bull)',
+    polePosition: 'M. Verstappen',
     sessions: [
       { name: 'FP1', type: 'FP1', startTimeUtc: '2026-09-11T11:30:00Z' },
       { name: 'FP2', type: 'FP2', startTimeUtc: '2026-09-11T15:00:00Z' },

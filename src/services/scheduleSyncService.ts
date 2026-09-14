@@ -55,7 +55,16 @@ class ScheduleSyncService {
       if (savedSchedule) {
         const parsed = JSON.parse(savedSchedule);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          this.state.schedule = parsed;
+          this.state.schedule = parsed.map(gp => {
+            const canonical = F1_SCHEDULE.find(c => c.round === gp.round);
+            const isFinished = canonical?.completed || isGrandPrixCompleted(gp);
+            return {
+              ...gp,
+              completed: isFinished,
+              winner: canonical?.winner || gp.winner,
+              polePosition: canonical?.polePosition || gp.polePosition,
+            };
+          });
         }
       }
     } catch (err) {
@@ -364,4 +373,61 @@ export function getGrandPrixTimeline(gp: GrandPrixEvent): GrandPrixTimeline {
     sessions: sessionInfos,
     allCompleted,
   };
+}
+
+/**
+ * Robust check if a Grand Prix has already completed based on explicit flag or if the Race has ended
+ */
+export function isGrandPrixCompleted(gp: GrandPrixEvent): boolean {
+  if (gp.completed) return true;
+  const raceSession = gp.sessions.find(s => s.type === 'Race');
+  if (raceSession?.startTimeUtc) {
+    const raceStart = new Date(raceSession.startTimeUtc).getTime();
+    if (!isNaN(raceStart)) {
+      // Completed if 3.5 hours after race start time
+      return Date.now() > (raceStart + 3.5 * 3600 * 1000);
+    }
+  }
+  const end = new Date(`${gp.endDate}T23:59:59Z`).getTime();
+  return !isNaN(end) && Date.now() > end;
+}
+
+/**
+ * Returns the actual next upcoming Grand Prix where the race is still in the future
+ */
+export function getNextUpcomingGrandPrix(schedule: GrandPrixEvent[]): GrandPrixEvent {
+  const upcoming = schedule.find(gp => !isGrandPrixCompleted(gp));
+  return upcoming || schedule[schedule.length - 1];
+}
+
+/**
+ * Returns the Race session (or undefined if not found)
+ */
+export function getRaceSession(gp: GrandPrixEvent): SessionSchedule | undefined {
+  return gp.sessions.find(s => s.type === 'Race');
+}
+
+/**
+ * Returns the exact timestamp (in ms) of the Race session for a Grand Prix
+ */
+export function getRaceTargetTimestamp(gp: GrandPrixEvent): number {
+  const race = getRaceSession(gp);
+  if (race?.startTimeUtc) {
+    const t = new Date(race.startTimeUtc).getTime();
+    if (!isNaN(t)) return t;
+  }
+  return new Date(`${gp.endDate}T13:00:00Z`).getTime();
+}
+
+/**
+ * Computes remaining time breakdown (days, hours, minutes, seconds)
+ */
+export function getTimeRemaining(targetDateMs: number, nowMs: number = Date.now()) {
+  const diff = Math.max(0, targetDateMs - nowMs);
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
+  const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+  const isPast = diff <= 0;
+  return { days, hours, minutes, seconds, diff, isPast };
 }

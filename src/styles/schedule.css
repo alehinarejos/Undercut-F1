@@ -1,21 +1,875 @@
-/* Schedule & Calendar View */
+/* Schedule & Calendar View - Formula 1 Interactive Dashboard */
 .schedule-page {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 16px;
+  width: 100%;
 }
 
-/* Countdown Banner */
-.countdown-banner {
-  background: linear-gradient(135deg, rgba(225, 6, 0, 0.15) 0%, rgba(19, 25, 38, 0.8) 100%);
-  border: 1px solid rgba(225, 6, 0, 0.3);
-  border-radius: 12px;
-  padding: 24px;
+/* Top Toolbar: View Mode Switcher, Sync Badge & Quick Filters */
+.schedule-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
-  gap: 20px;
+  gap: 12px;
+  background: var(--f1-surface-glass);
+  border: 1px solid var(--f1-border);
+  padding: 10px 16px;
+  border-radius: 10px;
+}
+
+.schedule-view-switcher {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  padding: 3px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.schedule-switch-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.schedule-switch-btn:hover {
+  color: #fff;
+}
+
+.schedule-switch-btn.active {
+  background: var(--f1-red);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(225, 6, 0, 0.35);
+}
+
+/* Sync status badge in toolbar */
+.schedule-sync-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.74rem;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+}
+
+/* ============================================================ */
+/* MAP VIEW: FULLSCREEN / EXPANDED INTERACTIVE MAPBOX WORLD MAP */
+/* ============================================================ */
+.schedule-map-wrapper {
+  position: relative;
+  width: 100%;
+  height: 740px;
+  min-height: 560px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--f1-border);
+  background: #0d1117;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+.schedule-map-container {
+  width: 100%;
+  height: 100%;
+}
+
+/* Hide default mapbox attribution watermark nicely */
+.schedule-map-container .mapboxgl-ctrl-bottom-right,
+.schedule-map-container .mapboxgl-ctrl-bottom-left {
+  display: none !important;
+}
+
+/* Dark Custom Navigation Controls */
+.schedule-map-container .mapboxgl-ctrl-group {
+  background: rgba(15, 20, 30, 0.85) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  backdrop-filter: blur(10px);
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+
+.schedule-map-container .mapboxgl-ctrl-group button {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.schedule-map-container .mapboxgl-ctrl-group button:hover {
+  background: rgba(225, 6, 0, 0.25) !important;
+}
+
+.schedule-map-container .mapboxgl-ctrl-icon {
+  filter: invert(1);
+}
+
+/* Custom Interactive Map Markers (World Overview Pins) */
+.mapbox-world-marker {
+  cursor: pointer;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.8), 0 0 4px rgba(255, 255, 255, 0.5);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
+  z-index: 5;
+}
+
+.mapbox-world-marker:hover {
+  transform: scale(1.6);
+  z-index: 25;
+}
+
+/* Completed Marker (Green) */
+.mapbox-world-marker.marker-completed {
+  background: #00D7B6;
+}
+
+/* Next / Active Upcoming Marker (Crimson Pulsing) */
+.mapbox-world-marker.marker-next {
+  background: var(--f1-red);
+  box-shadow: 0 0 12px rgba(225, 6, 0, 0.9), 0 0 20px rgba(225, 6, 0, 0.5);
+}
+
+.mapbox-world-marker.marker-next .marker-pulse-ring,
+.circuit-active-pin .marker-pulse-ring {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 2px solid #ff4d4d;
+  animation: marker-pulse 1.8s infinite cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  pointer-events: none;
+}
+
+@keyframes marker-pulse {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.95;
+  }
+  100% {
+    transform: scale(2.2);
+    opacity: 0;
+  }
+}
+
+/* Future Marker (Dark Slate) */
+.mapbox-world-marker.marker-future {
+  background: #3a4454;
+}
+
+/* Selected Marker Highlight */
+.mapbox-world-marker.marker-selected {
+  transform: scale(1.7);
+  box-shadow: 0 0 16px #ffeb3b, 0 0 0 2px #ffeb3b !important;
+  z-index: 30;
+}
+
+/* Active Circuit Pin on the Track (when zoomed in) */
+.circuit-active-pin {
+  cursor: pointer;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--f1-red);
+  border: 2.5px solid #ffffff;
+  box-shadow: 0 0 14px rgba(225, 6, 0, 0.95);
+  z-index: 20;
+}
+
+/* Map Quick View Buttons (World vs Circuit View) */
+.map-view-controls {
+  position: absolute;
+  top: 16px;
+  right: 60px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 20, 30, 0.85);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 4px;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.map-control-pill {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.map-control-pill:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.map-control-pill.active {
+  background: var(--f1-red);
+  color: #fff;
+  box-shadow: 0 0 10px rgba(225, 6, 0, 0.4);
+}
+
+/* ============================================================ */
+/* FLOATING ASIDE PANEL: WEEKEND SCHEDULE & CIRCUIT DETAILS     */
+/* ============================================================ */
+.schedule-aside-panel {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 350px;
+  max-width: calc(100% - 32px);
+  max-height: calc(100% - 150px);
+  background: rgba(11, 15, 25, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  z-index: 10;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  transition: var(--transition-smooth);
+}
+
+.schedule-aside-panel::-webkit-scrollbar {
+  width: 4px;
+}
+.schedule-aside-panel::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+/* Colored Top Status Accent */
+.schedule-aside-accent {
+  height: 3px;
+  width: 100%;
+}
+.schedule-aside-accent.accent-completed {
+  background: linear-gradient(90deg, #00D7B6, #00b096);
+}
+.schedule-aside-accent.accent-next {
+  background: linear-gradient(90deg, #ff4d4d, var(--f1-red));
+  box-shadow: 0 0 8px rgba(225, 6, 0, 0.8);
+}
+.schedule-aside-accent.accent-future {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.05));
+}
+
+.schedule-aside-content {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Aside Header */
+.aside-header-tags {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.aside-round-badge {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--f1-red);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.aside-sprint-badge {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  font-weight: 800;
+  background: rgba(217, 70, 239, 0.15);
+  border: 1px solid rgba(217, 70, 239, 0.4);
+  color: #e879f9;
+  padding: 2px 7px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.aside-status-badge {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.aside-status-badge.status-completed {
+  background: rgba(0, 215, 182, 0.12);
+  border: 1px solid rgba(0, 215, 182, 0.3);
+  color: #00D7B6;
+}
+.aside-status-badge.status-next {
+  background: rgba(225, 6, 0, 0.2);
+  border: 1px solid rgba(225, 6, 0, 0.4);
+  color: #ff4d4d;
+  animation: pulse-live 2s infinite ease-in-out;
+}
+.aside-status-badge.status-future {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text-muted);
+}
+
+.aside-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.aside-gp-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 900;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  line-height: 1.2;
+}
+
+.aside-circuit-name {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.aside-dates {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* Aside Countdown Card */
+.aside-countdown-box {
+  background: linear-gradient(135deg, rgba(225, 6, 0, 0.15), rgba(15, 20, 30, 0.8));
+  border: 1px solid rgba(225, 6, 0, 0.3);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.aside-countdown-title {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: #ff6666;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.aside-timer-digits {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.aside-timer-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+
+.aside-timer-num {
+  font-family: var(--font-mono);
+  font-size: 1.15rem;
+  font-weight: 900;
+  color: #fff;
+}
+
+.aside-timer-lbl {
+  font-family: var(--font-mono);
+  font-size: 0.52rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+/* Aside Winner / Results Box */
+.aside-results-box {
+  background: rgba(255, 215, 0, 0.06);
+  border: 1px solid rgba(255, 215, 0, 0.2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.aside-winner-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.78rem;
+  color: #ffd700;
+}
+
+.aside-pole-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.aside-results-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 215, 0, 0.12);
+  border: 1px solid rgba(255, 215, 0, 0.35);
+  color: #ffd700;
+  border-radius: 6px;
+  font-size: 0.74rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.aside-results-btn:hover {
+  background: rgba(255, 215, 0, 0.25);
+  color: #fff;
+}
+
+/* Aside Sessions Timetable */
+.aside-sessions-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.aside-section-title {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.aside-sessions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  border-radius: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.aside-session-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 6px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  transition: background 0.15s ease;
+}
+
+.aside-session-row:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.aside-session-row.is-race {
+  font-weight: 700;
+  color: #fff;
+  background: rgba(225, 6, 0, 0.1);
+  border: 1px solid rgba(225, 6, 0, 0.2);
+}
+
+.aside-session-time {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  font-size: 0.68rem;
+  background: rgba(0, 215, 182, 0.12);
+  color: #00D7B6;
+  border: 1px solid rgba(0, 215, 182, 0.25);
+}
+
+.aside-session-time.race-time {
+  background: rgba(225, 6, 0, 0.2);
+  color: #ff4d4d;
+  border-color: rgba(225, 6, 0, 0.4);
+}
+
+/* Aside Circuit Specs & Real Track Image */
+.aside-circuit-specs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 10px;
+  border-radius: 8px;
+}
+
+.aside-track-img-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 95px;
+  width: 100%;
+  background: radial-gradient(circle, rgba(225, 6, 0, 0.08) 0%, rgba(0, 0, 0, 0.5) 100%);
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 8px;
+  overflow: hidden;
+}
+
+.aside-track-real-img {
+  max-width: 90%;
+  max-height: 80px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.45));
+  transition: transform 0.3s ease;
+}
+
+.aside-track-img-container:hover .aside-track-real-img {
+  transform: scale(1.05);
+}
+
+.aside-specs-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.aside-spec-card {
+  display: flex;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 6px 8px;
+  border-radius: 4px;
+}
+
+.aside-spec-label {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.aside-spec-val {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.aside-lap-record {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 6px 8px;
+  border-radius: 4px;
+  color: var(--text-secondary);
+}
+
+/* Aside Actions Bottom */
+.aside-bottom-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.aside-action-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.aside-action-btn:hover {
+  background: var(--f1-red);
+  border-color: var(--f1-red);
+}
+
+/* ============================================================ */
+/* BOTTOM HORIZONTAL SNAP CAROUSEL (Matching formula1dashboard) */
+/* ============================================================ */
+.schedule-carousel-wrapper {
+  position: absolute;
+  bottom: 14px;
+  left: 14px;
+  right: 14px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.carousel-nav-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(15, 20, 30, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  transition: var(--transition-fast);
+  flex-shrink: 0;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.6);
+}
+
+.carousel-nav-btn:hover {
+  background: var(--f1-red);
+  border-color: var(--f1-red);
+  transform: scale(1.1);
+}
+
+.schedule-carousel-track {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  scroll-snap-type: x mandatory;
+  padding: 6px 2px;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  width: 100%;
+}
+
+.schedule-carousel-track::-webkit-scrollbar {
+  display: none;
+}
+
+/* Individual Snap Card (Horizontal Split: Info on Left, Real Circuit Track on Right) */
+.carousel-gp-card {
+  flex: 0 0 230px;
+  min-width: 230px;
+  scroll-snap-align: start;
+  background: rgba(13, 17, 28, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 12px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.55);
+  position: relative;
+  overflow: hidden;
+  height: 86px;
+}
+
+.carousel-gp-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(255, 255, 255, 0.35);
+  background: rgba(20, 26, 42, 0.98);
+}
+
+.carousel-gp-card.is-selected {
+  border-color: rgba(255, 255, 255, 0.45);
+  box-shadow: 0 0 20px rgba(225, 6, 0, 0.4), 0 0 0 1.5px rgba(255, 255, 255, 0.6);
+  transform: translateY(-3px);
+  background: rgba(22, 28, 44, 0.98);
+}
+
+.carousel-gp-card.is-selected::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--f1-red);
+}
+
+/* Left Info Column */
+.carousel-card-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.carousel-card-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.carousel-round-pill {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 800;
+  color: var(--text-muted);
+}
+
+.carousel-card-top .sprint-tag {
+  font-family: var(--font-mono);
+  font-size: 0.50rem;
+  font-weight: 800;
+  background: rgba(217, 70, 239, 0.2);
+  border: 1px solid rgba(217, 70, 239, 0.4);
+  color: #e879f9;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.carousel-status-pill {
+  font-family: var(--font-mono);
+  font-size: 0.52rem;
+  font-weight: 800;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.carousel-status-pill.completed {
+  background: rgba(0, 215, 182, 0.15);
+  color: #00D7B6;
+  border: 1px solid rgba(0, 215, 182, 0.3);
+}
+.carousel-status-pill.next {
+  background: rgba(225, 6, 0, 0.25);
+  color: #ff4d4d;
+  border: 1px solid rgba(225, 6, 0, 0.5);
+  animation: pulse-live 1.8s infinite;
+}
+.carousel-status-pill.future {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.carousel-gp-title {
+  font-family: var(--font-display);
+  font-size: 0.88rem;
+  font-weight: 800;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  line-height: 1.2;
+}
+
+.carousel-gp-date {
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  color: var(--text-muted);
+}
+
+/* Right Track Outline Column */
+.carousel-card-track-col {
+  width: 75px;
+  height: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.carousel-track-real-img {
+  max-width: 100%;
+  max-height: 52px;
+  object-fit: contain;
+  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.35));
+  transition: transform 0.2s ease, filter 0.2s ease;
+}
+
+.carousel-gp-card:hover .carousel-track-real-img,
+.carousel-gp-card.is-selected .carousel-track-real-img {
+  filter: drop-shadow(0 0 6px rgba(255, 255, 255, 0.7));
+  transform: scale(1.08);
+}
+
+/* ============================================================ */
+/* COUNTDOWN HERO BANNER (Top Hero Banner)                      */
+/* ============================================================ */
+.countdown-banner {
+  background: linear-gradient(135deg, rgba(225, 6, 0, 0.15) 0%, rgba(19, 25, 38, 0.8) 100%);
+  border: 1px solid rgba(225, 6, 0, 0.3);
+  border-radius: 12px;
+  padding: 20px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 18px;
 }
 
 .countdown-info {
@@ -35,20 +889,20 @@
 
 .countdown-gp-name {
   font-family: var(--font-display);
-  font-size: 1.8rem;
+  font-size: 1.7rem;
   font-weight: 900;
   color: #fff;
 }
 
 .countdown-track {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   color: var(--text-secondary);
 }
 
 .countdown-timer-group {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .timer-unit-box {
@@ -57,14 +911,14 @@
   align-items: center;
   background: rgba(0, 0, 0, 0.5);
   border: 1px solid var(--f1-border);
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-radius: 8px;
-  min-width: 68px;
+  min-width: 64px;
 }
 
 .timer-number {
   font-family: var(--font-mono);
-  font-size: 1.8rem;
+  font-size: 1.6rem;
   font-weight: 900;
   color: #fff;
   line-height: 1;
@@ -72,14 +926,31 @@
 
 .timer-label {
   font-family: var(--font-mono);
-  font-size: 0.65rem;
+  font-size: 0.62rem;
   color: var(--text-muted);
   text-transform: uppercase;
   font-weight: 700;
   margin-top: 4px;
 }
 
-/* Calendar Grid */
+/* ============================================================ */
+/* GRID VIEW: ORIGINAL FULL LIST / GRID COMPATIBILITY           */
+/* ============================================================ */
+.schedule-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+  width: 100%;
+}
+
+.schedule-filter-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -190,23 +1061,164 @@
   font-family: var(--font-mono);
 }
 
-.schedule-header-row {
+.gp-card-race-countdown {
+  background: linear-gradient(145deg, rgba(20, 24, 33, 0.95), rgba(10, 12, 18, 0.98));
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  transition: var(--transition-smooth);
+}
+
+.gp-card-race-countdown.is-next-race {
+  border-color: rgba(225, 6, 0, 0.4);
+  background: linear-gradient(145deg, rgba(35, 15, 18, 0.9), rgba(15, 10, 14, 0.98));
+  box-shadow: 0 0 14px rgba(225, 6, 0, 0.15), inset 0 1px 0 rgba(225, 6, 0, 0.2);
+}
+
+.gp-countdown-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 14px;
-  width: 100%;
 }
 
-.schedule-filter-btn-group {
+.gp-countdown-label {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.gp-next-pill {
+  font-family: var(--font-mono);
+  font-size: 0.60rem;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: rgba(225, 6, 0, 0.2);
+  color: #ff4d4d;
+  border: 1px solid rgba(225, 6, 0, 0.4);
+  animation: pulse-live 2s infinite ease-in-out;
+}
+
+.gp-countdown-grid {
   display: flex;
   align-items: center;
-  gap: 8px;
+  justify-content: space-between;
+  gap: 4px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 6px 10px;
+  border-radius: 6px;
 }
 
-/* Responsive adjustments for Schedule */
+.gp-cd-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 32px;
+}
+
+.gp-cd-num {
+  font-family: var(--font-mono);
+  font-size: 1.05rem;
+  font-weight: 900;
+  color: #ffffff;
+  line-height: 1;
+  letter-spacing: 0.02em;
+}
+
+.gp-cd-seconds .gp-cd-num {
+  color: var(--f1-red);
+}
+
+.gp-cd-txt {
+  font-family: var(--font-mono);
+  font-size: 0.52rem;
+  color: var(--text-muted);
+  font-weight: 700;
+  margin-top: 3px;
+  letter-spacing: 0.04em;
+}
+
+.gp-cd-colon {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.25);
+  margin-bottom: 8px;
+}
+
+.gp-card-view-results-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #fff;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.gp-card-view-results-btn:hover {
+  background: var(--f1-red);
+  border-color: var(--f1-red);
+}
+
+/* ============================================================ */
+/* RESPONSIVE LAYOUT BREAKPOINTS                                */
+/* ============================================================ */
+@media (max-width: 900px) {
+  .schedule-map-wrapper {
+    height: 680px;
+  }
+
+  .schedule-aside-panel {
+    width: 300px;
+    top: 10px;
+    left: 10px;
+    max-height: calc(100% - 140px);
+  }
+}
+
 @media (max-width: 768px) {
+  .schedule-map-wrapper {
+    height: 580px;
+    border-radius: 10px;
+  }
+
+  .schedule-aside-panel {
+    width: calc(100% - 20px);
+    top: 10px;
+    left: 10px;
+    max-height: 220px;
+    padding: 2px;
+  }
+
+  .aside-specs-grid,
+  .aside-track-svg-container {
+    display: none;
+  }
+
+  .carousel-gp-card {
+    flex: 0 0 145px;
+    padding: 8px;
+  }
+
+  .carousel-track-preview {
+    height: 32px;
+  }
+
   .countdown-banner {
     flex-direction: column;
     align-items: flex-start;
@@ -232,42 +1244,6 @@
 
   .timer-number {
     font-size: 1.35rem;
-  }
-
-  .schedule-header-row {
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
-    gap: 12px;
-  }
-
-  .schedule-main-title {
-    justify-content: center;
-    font-size: 1.05rem !important;
-    text-align: center;
-  }
-
-  .schedule-main-subtitle {
-    text-align: center;
-    display: block;
-    font-size: 0.72rem !important;
-  }
-
-  .schedule-filter-btn-group {
-    display: flex;
-    justify-content: center;
-    width: 100%;
-    margin: 0 auto;
-    gap: 6px;
-  }
-
-  .schedule-filter-btn-group .f1-btn {
-    flex: 1;
-    font-size: 0.72rem;
-    padding: 7px 4px;
-    justify-content: center;
-    text-align: center;
-    white-space: nowrap;
   }
 
   .calendar-grid {

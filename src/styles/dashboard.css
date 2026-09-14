@@ -45,6 +45,13 @@
   min-width: 0;
 }
 
+.header-logo-link {
+  text-decoration: none;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+}
+
 .f1-logo-badge {
   display: flex;
   align-items: center;

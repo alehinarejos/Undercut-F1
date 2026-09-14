@@ -1,5 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { scheduleSyncService, getGrandPrixTimeline } from '../services/scheduleSyncService';
+import { 
+  scheduleSyncService, 
+  getGrandPrixTimeline, 
+  getNextUpcomingGrandPrix, 
+  isGrandPrixCompleted, 
+  getRaceTargetTimestamp 
+} from '../services/scheduleSyncService';
 import type { ScheduleSyncState } from '../services/scheduleSyncService';
 import { useLanguage } from '../context/LanguageContext';
 import { RaceResultsModal } from './RaceResultsModal';
@@ -22,8 +28,9 @@ export const ScheduleBox: React.FC<ScheduleBoxProps> = ({ onOpenFullSchedule }) 
   }, []);
 
   const schedule = syncState.schedule;
-  const nextGp = schedule.find(gp => !gp.completed) || schedule[15];
-  const lastCompletedGp = schedule[14]; // Round 15 Monza
+  const nextGp = getNextUpcomingGrandPrix(schedule);
+  const completedGps = schedule.filter(gp => isGrandPrixCompleted(gp));
+  const lastCompletedGp = completedGps[completedGps.length - 1];
 
   const timeline = getGrandPrixTimeline(nextGp);
   const nextTargetSession = timeline.nextSession;
@@ -32,7 +39,7 @@ export const ScheduleBox: React.FC<ScheduleBoxProps> = ({ onOpenFullSchedule }) 
 
   const targetDateMs = nextTargetSession 
     ? nextTargetSession.startTime 
-    : new Date(`${nextGp.startDate}T11:30:00Z`).getTime();
+    : getRaceTargetTimestamp(nextGp);
 
   // Live countdown to next race/session
   const [timeLeft, setTimeLeft] = useState({
@@ -152,7 +159,7 @@ export const ScheduleBox: React.FC<ScheduleBoxProps> = ({ onOpenFullSchedule }) 
               </div>
 
               <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {nextGp.circuitName} • {nextGp.startDate} al {nextGp.endDate}
+                {nextGp.circuitName} • {nextGp.startDate} {t('date_to')} {nextGp.endDate}
               </span>
             </div>
           </div>

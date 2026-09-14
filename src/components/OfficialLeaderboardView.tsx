@@ -14,11 +14,12 @@ import type { StandingsSyncState } from '../services/standingsSyncService';
 import { computeDriverStandingsAnalytics } from '../services/driverStandingsAnalytics';
 import type { DriverStandingsAnalyticsData } from '../services/driverStandingsAnalytics';
 import { TeamLogo } from './TeamLogo';
+import { useLanguage } from '../context/LanguageContext';
 import '../styles/driver-standings.css';
 
 export const OfficialLeaderboardView: React.FC = () => {
+  const { t } = useLanguage();
   const [view, setView] = useState<'drivers' | 'constructors'>('drivers');
-  const [selectedSeason] = useState<number>(2026);
   const [selectedDriverCode, setSelectedDriverCode] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isDriverFilterOpen, setIsDriverFilterOpen] = useState<boolean>(false);
@@ -145,25 +146,25 @@ export const OfficialLeaderboardView: React.FC = () => {
           </div>
           <div>
             <h1 className="standings-page-h1">
-              {view === 'drivers' ? '2026 F1 Driver Standings' : '2026 F1 Constructor Standings'}
+              {view === 'drivers' ? t('driver_standings_title') : t('constructor_standings_title')}
               <span className="f1-badge badge-green" style={{ fontSize: '0.66rem', fontWeight: 800 }}>
                 <CheckCircle2 size={10} style={{ display: 'inline', marginRight: '3px' }} />
-                FIA OFICIAL
+                {t('official_fia')}
               </span>
             </h1>
             <div className="standings-page-subtitle">
               {view === 'drivers' 
-                ? 'Evolución oficial de puntos y posiciones vuelta a vuelta • Temporada 2026'
-                : 'Clasificación oficial del Campeonato Mundial de Constructores de Fórmula 1'}
+                ? t('driver_standings_subtitle')
+                : t('constructor_standings_subtitle')}
             </div>
           </div>
         </div>
 
         <div className="standings-controls-group">
           {/* Season Selector */}
-          <button className="standings-pill-btn" title="Temporada">
+          <button className="standings-pill-btn" title={t('season_badge')}>
             <Calendar size={13} color="#00D7B6" />
-            <span>Season {selectedSeason}</span>
+            <span>{t('season_badge')}</span>
           </button>
 
           {/* Drivers Filter Pill */}
@@ -171,10 +172,10 @@ export const OfficialLeaderboardView: React.FC = () => {
             <button 
               className="standings-pill-btn"
               onClick={() => setIsDriverFilterOpen(!isDriverFilterOpen)}
-              title="Filtrar pilotos en los gráficos"
+              title={t('filter_drivers')}
             >
               <Users size={13} color="#00D7B6" />
-              <span>Drivers</span>
+              <span>{t('filter_drivers')}</span>
               <span className="standings-pill-badge">{visibleDriverCodes.size}</span>
               <ChevronDown size={11} color="#94a3b8" />
             </button>
@@ -196,21 +197,21 @@ export const OfficialLeaderboardView: React.FC = () => {
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                  <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#f8fafc' }}>Filtrar Pilotos</span>
+                  <span style={{ fontSize: '0.74rem', fontWeight: 800, color: '#f8fafc' }}>{t('filter_drivers')}</span>
                   <div style={{ display: 'flex', gap: '6px' }}>
                     <button 
                       onClick={selectAllDrivers} 
                       className="f1-btn" 
                       style={{ fontSize: '0.62rem', padding: '2px 6px' }}
                     >
-                      Todos
+                      {t('filter_all_drivers')}
                     </button>
                     <button 
                       onClick={selectTop5Drivers} 
                       className="f1-btn" 
                       style={{ fontSize: '0.62rem', padding: '2px 6px' }}
                     >
-                      Top 5
+                      {t('filter_top_5')}
                     </button>
                   </div>
                 </div>
@@ -251,13 +252,13 @@ export const OfficialLeaderboardView: React.FC = () => {
               className={`standings-tab-item ${view === 'drivers' ? 'active' : ''}`}
               onClick={() => setView('drivers')}
             >
-              Pilotos
+              {t('drivers_tab')}
             </button>
             <button 
               className={`standings-tab-item ${view === 'constructors' ? 'active' : ''}`}
               onClick={() => setView('constructors')}
             >
-              Constructores
+              {t('constructors_tab')}
             </button>
           </div>
 
@@ -266,7 +267,7 @@ export const OfficialLeaderboardView: React.FC = () => {
             className="standings-pill-btn" 
             onClick={handleManualSync}
             disabled={syncState.isSyncing}
-            title="Sincronizar con API oficial de la FIA"
+            title={t('sync_now')}
           >
             <RotateCw 
               size={12} 
@@ -284,13 +285,13 @@ export const OfficialLeaderboardView: React.FC = () => {
               ========================================================== */}
           <div className="standings-table-card">
             <div className="standings-card-header">
-              <h3 className="standings-card-title">2026 F1 Driver Standings</h3>
+              <h3 className="standings-card-title">{t('driver_standings_title')}</h3>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '4px', background: 'rgba(255,255,255,0.05)', padding: '2px 8px', borderRadius: '4px' }}>
                   <Search size={11} color="#64748b" />
                   <input 
                     type="text"
-                    placeholder="Buscar..."
+                    placeholder={t('search_standings')}
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     style={{
@@ -299,11 +300,11 @@ export const OfficialLeaderboardView: React.FC = () => {
                       color: '#fff',
                       fontSize: '0.70rem',
                       outline: 'none',
-                      width: '65px'
+                      width: '80px'
                     }}
                   />
                 </div>
-                <button className="standings-export-btn" title="Descargar datos">
+                <button className="standings-export-btn" title={t('export_data')}>
                   <Download size={14} />
                 </button>
               </div>
@@ -312,10 +313,10 @@ export const OfficialLeaderboardView: React.FC = () => {
             <table className="standings-table">
               <thead>
                 <tr>
-                  <th style={{ width: '42px' }}>POS.</th>
-                  <th>DRIVER</th>
-                  <th style={{ textAlign: 'right' }}>POINTS</th>
-                  <th style={{ width: '38px', textAlign: 'center' }}>EVO.</th>
+                  <th style={{ width: '42px' }}>{t('col_pos')}</th>
+                  <th>{t('col_driver')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('col_points')}</th>
+                  <th style={{ width: '38px', textAlign: 'center' }}>{t('col_evo')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -340,7 +341,7 @@ export const OfficialLeaderboardView: React.FC = () => {
                       className={`standings-row ${isSelected ? 'selected' : ''}`}
                       onClick={() => setSelectedDriverCode(isSelected ? null : d.code)}
                       style={{ opacity: isVisible ? 1 : 0.4 }}
-                      title={`Haz clic para ${isSelected ? 'deseleccionar' : 'resaltar'} a ${d.name}`}
+                      title={isSelected ? t('click_to_unhighlight', { name: d.name }) : t('click_to_highlight', { name: d.name })}
                     >
                       <td className={`standings-pos-cell ${podiumClass}`}>
                         {rank}
@@ -384,8 +385,8 @@ export const OfficialLeaderboardView: React.FC = () => {
                 ---------------------------------------------------- */}
             <div className="analytics-card">
               <div className="analytics-card-header">
-                <h3 className="analytics-card-title">Driver Points Evolution</h3>
-                <button className="standings-export-btn" title="Exportar gráfico">
+                <h3 className="analytics-card-title">{t('chart_points_evolution')}</h3>
+                <button className="standings-export-btn" title={t('export_chart')}>
                   <Download size={14} />
                 </button>
               </div>
@@ -515,8 +516,8 @@ export const OfficialLeaderboardView: React.FC = () => {
                 ---------------------------------------------------- */}
             <div className="analytics-card">
               <div className="analytics-card-header">
-                <h3 className="analytics-card-title">Driver Ranking Evolution</h3>
-                <button className="standings-export-btn" title="Exportar gráfico">
+                <h3 className="analytics-card-title">{t('chart_ranking_evolution')}</h3>
+                <button className="standings-export-btn" title={t('export_chart')}>
                   <Download size={14} />
                 </button>
               </div>
@@ -626,8 +627,8 @@ export const OfficialLeaderboardView: React.FC = () => {
                 ---------------------------------------------------- */}
             <div className="analytics-card">
               <div className="analytics-card-header">
-                <h3 className="analytics-card-title">Driver Season Stats</h3>
-                <button className="standings-export-btn" title="Exportar estadísticas">
+                <h3 className="analytics-card-title">{t('chart_season_stats')}</h3>
+                <button className="standings-export-btn" title={t('export_chart')}>
                   <Download size={14} />
                 </button>
               </div>
@@ -636,23 +637,23 @@ export const OfficialLeaderboardView: React.FC = () => {
               <div className="stats-legend-group">
                 <div className="stats-legend-item">
                   <span className="stats-legend-box" style={{ background: '#ffd700' }} />
-                  <span>Wins</span>
+                  <span>{t('col_wins')}</span>
                 </div>
                 <div className="stats-legend-item">
                   <span className="stats-legend-box" style={{ background: '#38bdf8' }} />
-                  <span>Podiums</span>
+                  <span>{t('col_podiums')}</span>
                 </div>
                 <div className="stats-legend-item">
                   <span className="stats-legend-box" style={{ background: '#ffffff' }} />
-                  <span>Finishes in points</span>
+                  <span>{t('stat_finishes_points')}</span>
                 </div>
                 <div className="stats-legend-item">
                   <span className="stats-legend-box" style={{ background: '#c084fc' }} />
-                  <span>Pole positions</span>
+                  <span>{t('stat_poles')}</span>
                 </div>
                 <div className="stats-legend-item">
                   <span className="stats-legend-box" style={{ background: '#ef4444' }} />
-                  <span>DNF/DNS/DSQ</span>
+                  <span>{t('stat_dnf')}</span>
                 </div>
               </div>
 
@@ -762,8 +763,8 @@ export const OfficialLeaderboardView: React.FC = () => {
                 ---------------------------------------------------- */}
             <div className="analytics-card">
               <div className="analytics-card-header">
-                <h3 className="analytics-card-title">Driver Points by Race</h3>
-                <button className="standings-export-btn" title="Exportar distribución">
+                <h3 className="analytics-card-title">{t('chart_points_by_race')}</h3>
+                <button className="standings-export-btn" title={t('export_chart')}>
                   <Download size={14} />
                 </button>
               </div>
@@ -834,8 +835,8 @@ export const OfficialLeaderboardView: React.FC = () => {
         <div className="standings-dashboard-grid" style={{ gridTemplateColumns: '400px 1fr' }}>
           <div className="standings-table-card">
             <div className="standings-card-header">
-              <h3 className="standings-card-title">2026 F1 Constructor Standings</h3>
-              <button className="standings-export-btn" title="Descargar datos">
+              <h3 className="standings-card-title">{t('constructor_standings_title')}</h3>
+              <button className="standings-export-btn" title={t('export_data')}>
                 <Download size={14} />
               </button>
             </div>
@@ -843,10 +844,10 @@ export const OfficialLeaderboardView: React.FC = () => {
             <table className="standings-table">
               <thead>
                 <tr>
-                  <th style={{ width: '42px' }}>POS.</th>
-                  <th>TEAM</th>
-                  <th style={{ textAlign: 'right' }}>POINTS</th>
-                  <th style={{ textAlign: 'center' }}>WINS</th>
+                  <th style={{ width: '42px' }}>{t('col_pos')}</th>
+                  <th>{t('col_constructor')}</th>
+                  <th style={{ textAlign: 'right' }}>{t('col_points')}</th>
+                  <th style={{ textAlign: 'center' }}>{t('col_wins')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -880,7 +881,7 @@ export const OfficialLeaderboardView: React.FC = () => {
           <div className="standings-analytics-col">
             <div className="analytics-card">
               <div className="analytics-card-header">
-                <h3 className="analytics-card-title">Constructor Points Comparison</h3>
+                <h3 className="analytics-card-title">{t('chart_constructor_comparison')}</h3>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', padding: '10px 0' }}>
                 {syncState.constructors.map(c => {

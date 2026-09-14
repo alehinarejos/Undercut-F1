@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useLanguage } from '../context/LanguageContext';
-import { scheduleSyncService } from '../services/scheduleSyncService';
+import { 
+  scheduleSyncService, 
+  isGrandPrixCompleted, 
+  getNextUpcomingGrandPrix, 
+  getRaceTargetTimestamp,
+  getTimeRemaining,
+} from '../services/scheduleSyncService';
 import { OFFICIAL_DRIVER_STANDINGS, OFFICIAL_CONSTRUCTOR_STANDINGS } from '../data/officialStandings';
 import { CIRCUITS } from '../data/circuits';
 import { TeamLogo } from './TeamLogo';
 import { 
   Calendar, 
   Timer, 
-  Flame, 
-  Settings2, 
-  Wrench, 
   LayoutDashboard, 
   Filter 
 } from 'lucide-react';
@@ -20,7 +23,7 @@ interface HomeDashboardViewProps {
 }
 
 export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate }) => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [scheduleState, setScheduleState] = useState(scheduleSyncService.getState());
 
   useEffect(() => {
@@ -30,37 +33,23 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate
     return () => unsub();
   }, []);
 
-  // Upcoming Grand Prix (Spain / Madrid or next uncompleted)
+  // Upcoming Grand Prix (dynamically next uncompleted race)
   const schedule = scheduleState.schedule;
-  const nextGp = schedule.find(gp => !gp.completed) || schedule[15];
+  const nextGp = getNextUpcomingGrandPrix(schedule);
+  const completedCount = schedule.filter(gp => isGrandPrixCompleted(gp)).length;
+  const seasonProgressPct = ((completedCount / schedule.length) * 100).toFixed(1);
 
-  // Live countdown state
-  const [countdown, setCountdown] = useState({
-    days: 0,
-    hours: 0,
-    minutes: 25,
-    seconds: 21,
+  // Live countdown state targeting next race
+  const [countdown, setCountdown] = useState(() => {
+    const targetDate = getRaceTargetTimestamp(nextGp);
+    return getTimeRemaining(targetDate);
   });
 
   useEffect(() => {
-    const nextSession = nextGp.sessions.find(s => {
-      const ts = new Date(s.startTimeUtc).getTime();
-      return !isNaN(ts) && ts > Date.now();
-    }) || nextGp.sessions[nextGp.sessions.length - 1];
-
-    const targetIso = nextSession?.startTimeUtc || `${nextGp.startDate}T13:00:00Z`;
-    const targetDate = new Date(targetIso).getTime();
+    const targetDate = getRaceTargetTimestamp(nextGp);
 
     const tick = () => {
-      const now = Date.now();
-      const diff = Math.max(0, targetDate - now);
-
-      const days = Math.floor(diff / (1000 * 60 * 60 * 24));
-      const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-      const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-      const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-
-      setCountdown({ days, hours, minutes, seconds });
+      setCountdown(getTimeRemaining(targetDate));
     };
 
     tick();
@@ -68,8 +57,8 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate
     return () => clearInterval(interval);
   }, [nextGp]);
 
-  // Circuit SVG outline for Spain / Madrid
-  const spainCircuit = CIRCUITS.find(c => c.id === 'madrid') || CIRCUITS[0];
+  // Circuit SVG outline for next GP
+  const nextCircuit = CIRCUITS.find(c => c.id === nextGp.circuitId) || CIRCUITS[0];
 
   // Top 10 Drivers
   const top10Drivers = OFFICIAL_DRIVER_STANDINGS.slice(0, 10);
@@ -79,47 +68,107 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate
   const top10Constructors = OFFICIAL_CONSTRUCTOR_STANDINGS.slice(0, 10);
   const leaderConstPoints = top10Constructors[0]?.points || 468;
 
-  // News items for 2026 Stats & Records
+  // Multilingual News items for 2026 Stats & Records
   const newsItems = [
     {
       id: 1,
-      title: 'Five circuits set attendance records in first half of 2026',
-      desc: 'Australia, Canada, Austria, Silverstone and Belgium all established new circuit attendance records during the first 11 rounds of the 2026 season.',
-      tag: 'RACE',
+      title: language === 'es' 
+        ? 'Cinco circuitos baten récord histórico de asistencia en la primera mitad de 2026'
+        : language === 'fr'
+        ? 'Cinq circuits battent des records d’affluence lors de la première moitié de 2026'
+        : language === 'it'
+        ? 'Cinque circuiti stabiliscono record di presenze nella prima metà del 2026'
+        : 'Five circuits set attendance records in first half of 2026',
+      desc: language === 'es'
+        ? 'Australia, Canadá, Austria, Silverstone y Bélgica establecieron nuevos récords absolutos de asistencia en los primeros 11 Grandes Premios.'
+        : language === 'fr'
+        ? 'L’Australie, le Canada, l’Autriche, Silverstone et la Belgique ont tous établi de nouveaux records lors des 11 premières manches.'
+        : language === 'it'
+        ? 'Australia, Canada, Austria, Silverstone e Belgio hanno fatto segnare nuovi record nelle prime 11 tappe della stagione.'
+        : 'Australia, Canada, Austria, Silverstone and Belgium all established new circuit attendance records during the first 11 rounds of the 2026 season.',
+      tag: t('news_race_tag'),
       tagClass: 'f1-tag-race',
-      date: '29 July 2026',
+      date: language === 'es' ? '29 de julio de 2026' : language === 'fr' ? '29 juillet 2026' : language === 'it' ? '29 luglio 2026' : '29 July 2026',
     },
     {
       id: 2,
-      title: 'Oscar Piastri retires from Hungarian Grand Prix lead fight',
-      desc: 'Piastri led the early stages in Hungary before contact with Carlos Sainz and an apparent gearbox failure ended his race with 15 laps remaining.',
-      tag: 'DRIVER',
+      title: language === 'es'
+        ? 'Oscar Piastri abandona cuando luchaba por la victoria en el GP de Hungría'
+        : language === 'fr'
+        ? 'Oscar Piastri abandonne alors qu’il menait la bataille au Grand Prix de Hongrie'
+        : language === 'it'
+        ? 'Oscar Piastri si ritira mentre lottava per la vittoria nel Gran Premio d’Ungheria'
+        : 'Oscar Piastri retires from Hungarian Grand Prix lead fight',
+      desc: language === 'es'
+        ? 'Piastri lideró las primeras vueltas en Hungaroring antes de un contacto con Carlos Sainz y un fallo mecánico en la caja de cambios.'
+        : language === 'fr'
+        ? 'Piastri a mené les premiers tours en Hongrie avant un contact avec Carlos Sainz et une panne de boîte de vitesses à 15 tours de la fin.'
+        : language === 'it'
+        ? 'Piastri ha guidato le prime fasi in Ungheria prima del contatto con Sainz e un problema al cambio a 15 giri dal termine.'
+        : 'Piastri led the early stages in Hungary before contact with Carlos Sainz and an apparent gearbox failure ended his race with 15 laps remaining.',
+      tag: t('news_driver_tag'),
       tagClass: 'f1-tag-driver',
-      date: '26 July 2026',
+      date: language === 'es' ? '26 de julio de 2026' : language === 'fr' ? '26 juillet 2026' : language === 'it' ? '26 luglio 2026' : '26 July 2026',
     },
     {
       id: 3,
-      title: 'Nico Hulkenberg scores first points of 2026 season',
-      desc: 'Hulkenberg finished ninth for Audi in Hungary to register his first points of the 2026 campaign.',
-      tag: 'DRIVER',
+      title: language === 'es'
+        ? 'Nico Hülkenberg suma los primeros puntos de la temporada 2026 para Audi'
+        : language === 'fr'
+        ? 'Nico Hülkenberg inscrit les premiers points de la saison 2026 pour Audi'
+        : language === 'it'
+        ? 'Nico Hülkenberg conquista i primi punti della stagione 2026 per Audi'
+        : 'Nico Hulkenberg scores first points of 2026 season',
+      desc: language === 'es'
+        ? 'El piloto alemán finalizó noveno con una sólida estrategia de neumáticos para inaugurar el casillero de Audi F1.'
+        : language === 'fr'
+        ? 'Le pilote allemand a terminé neuvième pour Audi en Hongrie afin d’enregistrer ses premiers points de la campagne 2026.'
+        : language === 'it'
+        ? 'Il pilota tedesco ha chiuso al nono posto per l’Audi in Ungheria, registrando i suoi primi punti stagionali.'
+        : 'Hulkenberg finished ninth for Audi in Hungary to register his first points of the 2026 campaign.',
+      tag: t('news_driver_tag'),
       tagClass: 'f1-tag-driver',
-      date: '26 July 2026',
+      date: language === 'es' ? '26 de julio de 2026' : language === 'fr' ? '26 juillet 2026' : language === 'it' ? '26 luglio 2026' : '26 July 2026',
     },
     {
       id: 4,
-      title: 'Kimi Antonelli takes historic Monza victory on home soil',
-      desc: 'The Italian rookie drove a flawless race from pole position to claim his 7th win of the 2026 campaign in front of the Tifosi.',
-      tag: 'RACE',
+      title: language === 'es'
+        ? 'Kimi Antonelli logra una histórica victoria en Monza ante los Tifosi'
+        : language === 'fr'
+        ? 'Kimi Antonelli remporte une victoire historique à Monza devant les Tifosi'
+        : language === 'it'
+        ? 'Kimi Antonelli conquista una storica vittoria a Monza davanti ai Tifosi'
+        : 'Kimi Antonelli takes historic Monza victory on home soil',
+      desc: language === 'es'
+        ? 'El joven piloto dominó la carrera de principio a fin desde la pole position sumando su 7ª victoria en el templo de la velocidad.'
+        : language === 'fr'
+        ? 'Le jeune pilote a réalisé une course sans faute depuis la pole position pour décrocher son 7e succès de la campagne 2026.'
+        : language === 'it'
+        ? 'Il giovane pilota ha condotto una gara impeccabile dalla pole conquistando la sua 7ª vittoria stagionale a Monza.'
+        : 'The rookie drove a flawless race from pole position to claim his 7th win of the 2026 campaign in front of the Tifosi.',
+      tag: t('news_race_tag'),
       tagClass: 'f1-tag-race',
-      date: '6 September 2026',
+      date: language === 'es' ? '6 de septiembre de 2026' : language === 'fr' ? '6 septembre 2026' : language === 'it' ? '6 settembre 2026' : '6 September 2026',
     },
     {
       id: 5,
-      title: 'Madrid Street Circuit homologated for Spanish GP',
-      desc: 'The brand new IFEMA Madrid hybrid street circuit completed all FIA inspections with positive feedback from drivers.',
-      tag: 'CIRCUIT',
+      title: language === 'es'
+        ? 'El Circuito Urbano de Madrid recibe la homologación oficial de la FIA'
+        : language === 'fr'
+        ? 'Le Circuit Urbain de Madrid est homologué pour le GP d’Espagne'
+        : language === 'it'
+        ? 'Il Circuito Cittadino di Madrid omologato per il GP di Spagna'
+        : 'Madrid Street Circuit homologated for Spanish GP',
+      desc: language === 'es'
+        ? 'El trazado semiurbano de IFEMA Madrid superó con honores todas las inspecciones de seguridad y grado 1 de la FIA.'
+        : language === 'fr'
+        ? 'Le tout nouveau circuit hybride d’IFEMA Madrid a passé toutes les inspections de la FIA avec des retours très positifs.'
+        : language === 'it'
+        ? 'Il nuovo tracciato ibrido di IFEMA Madrid ha superato tutte le ispezioni FIA con pareri molto positivi.'
+        : 'The brand new IFEMA Madrid hybrid street circuit completed all FIA inspections with positive feedback from drivers.',
+      tag: t('news_circuit_tag'),
       tagClass: 'f1-tag-circuit',
-      date: '10 September 2026',
+      date: language === 'es' ? '10 de septiembre de 2026' : language === 'fr' ? '10 septembre 2026' : language === 'it' ? '10 settembre 2026' : '10 September 2026',
     },
   ];
 
@@ -131,7 +180,7 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate
           <span className="home-breadcrumb-icon">
             <LayoutDashboard size={18} />
           </span>
-          <span>Home</span>
+          <span>{t('tab_dashboard')}</span>
         </div>
 
         <div className="home-season-badge">
@@ -146,29 +195,29 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate
         <div 
           className="f1-hero-countdown-card"
           onClick={() => onNavigate('timing')}
-          title="Abrir Telemetría y Tiempos en Directo"
+          title={t('tab_telemetry')}
         >
           <div className="f1-countdown-tag-row">
-            <span className="f1-countdown-pill">R14</span>
-            <span className="f1-countdown-title">Spain: Race</span>
+            <span className="f1-countdown-pill">R{nextGp.round}</span>
+            <span className="f1-countdown-title">{nextGp.country || nextGp.name}: {t('news_race_tag')}</span>
           </div>
 
           <div className="f1-countdown-grid">
             <div className="f1-digit-block">
               <span className="f1-digit-value">{String(countdown.days).padStart(2, '0')}</span>
-              <span className="f1-digit-label">DAYS</span>
+              <span className="f1-digit-label">{t('days_short')}</span>
             </div>
             <div className="f1-digit-block">
               <span className="f1-digit-value">{String(countdown.hours).padStart(2, '0')}</span>
-              <span className="f1-digit-label">HRS</span>
+              <span className="f1-digit-label">{t('hours_short')}</span>
             </div>
             <div className="f1-digit-block">
               <span className="f1-digit-value">{String(countdown.minutes).padStart(2, '0')}</span>
-              <span className="f1-digit-label">MINS</span>
+              <span className="f1-digit-label">{t('mins_short')}</span>
             </div>
             <div className="f1-digit-block">
               <span className="f1-digit-value">{String(countdown.seconds).padStart(2, '0')}</span>
-              <span className="f1-digit-label">SEC</span>
+              <span className="f1-digit-label">{t('secs_short')}</span>
             </div>
           </div>
         </div>
@@ -177,21 +226,21 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate
         <div 
           className="f1-schedule-card"
           onClick={() => onNavigate('schedule')}
-          title="Ver Calendario Completo 2026"
+          title={t('view_full_schedule')}
         >
           <div className="f1-schedule-info">
             <span className="f1-card-subtitle">{t('schedule_card_title')}</span>
             <div className="f1-schedule-country">
-              <span>🇪🇸</span>
-              <span>Spain</span>
+              <span>{nextGp.flag}</span>
+              <span>{nextGp.country}</span>
             </div>
-            <span className="f1-schedule-progress">56.5% of season completed</span>
+            <span className="f1-schedule-progress">{t('season_completed_label', { pct: seasonProgressPct })}</span>
           </div>
 
           <div className="f1-schedule-track-preview">
-            <svg viewBox={spainCircuit.viewBox || "0 0 850 520"}>
+            <svg viewBox={nextCircuit.viewBox || "0 0 850 520"}>
               <path 
-                d={spainCircuit.svgPath} 
+                d={nextCircuit.svgPath} 
                 fill="none" 
                 stroke="#FFFFFF" 
                 strokeWidth="18" 
@@ -217,141 +266,12 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate
 
           <div className="f1-pitstop-holder">
             <img src="/teams/racing_bulls.png" alt="RB" className="rb-icon" />
-            <span>Lindblad - Round 11  🇭🇺 Hungary</span>
+            <span>Lindblad - {t('round')} 11  🇭🇺 {language === 'es' ? 'Hungría' : language === 'fr' ? 'Hongrie' : language === 'it' ? 'Ungheria' : 'Hungary'}</span>
           </div>
         </div>
       </div>
 
-      {/* Row 2: Metric Analytics Cards (3 Columns) */}
-      <div className="home-row-2">
-        {/* Card 4: Crash Damage */}
-        <div className="f1-metric-card">
-          <div className="f1-card-top-row">
-            <span className="f1-card-subtitle">{t('crash_damage_title')}</span>
-            <div className="f1-card-icon-bubble">
-              <Flame size={16} />
-            </div>
-          </div>
 
-          <div className="f1-metric-value">
-            $16,090,000
-          </div>
-
-          <div className="f1-metric-trend trend-damage">
-            <span>↗ $1,060,000 (+7.05%)</span>
-            <span className="f1-trend-sub">{t('vs_previous_round')}</span>
-          </div>
-        </div>
-
-        {/* Card 5: Total Used Elements */}
-        <div className="f1-metric-card">
-          <div className="f1-card-top-row">
-            <span className="f1-card-subtitle">{t('used_elements_title')}</span>
-            <div className="f1-card-icon-bubble">
-              <Settings2 size={16} />
-            </div>
-          </div>
-
-          <div className="f1-metric-value">
-            540
-          </div>
-
-          <div className="f1-metric-trend trend-positive">
-            <span>↗ 5 (+0.93%)</span>
-            <span className="f1-trend-sub">{t('vs_previous_round')}</span>
-          </div>
-        </div>
-
-        {/* Card 6: Total Tech Upgrades */}
-        <div className="f1-metric-card">
-          <div className="f1-card-top-row">
-            <span className="f1-card-subtitle">{t('tech_upgrades_title')}</span>
-            <div className="f1-card-icon-bubble">
-              <Wrench size={16} />
-            </div>
-          </div>
-
-          <div className="f1-metric-value">
-            380
-          </div>
-
-          <div className="f1-metric-trend trend-positive">
-            <span>↗ 10 (+2.63%)</span>
-            <span className="f1-trend-sub">{t('vs_previous_round')}</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Row 3: Banners (Purple Social Banner + New Liveries Card) */}
-      <div className="home-row-3">
-        {/* Social Media Engagement Banner */}
-        <div className="f1-social-banner">
-          <div className="f1-social-text">
-            <strong>{t('stay_connected_title')}</strong> {t('stay_connected_desc')}
-          </div>
-
-          <div className="f1-social-icons-row">
-            <div className="f1-social-btn" title="Instagram">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="2" y="2" width="20" height="20" rx="5" ry="5"/>
-                <path d="M16 11.37A4 4 0 1 1 12.63 8 4 4 0 0 1 16 11.37z"/>
-                <line x1="17.5" y1="6.5" x2="17.51" y2="6.5"/>
-              </svg>
-            </div>
-            <div className="f1-social-btn" title="X (Twitter)">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-              </svg>
-            </div>
-            <div className="f1-social-btn" title="Reddit">
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor">
-                <circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" strokeWidth="1.8"/>
-                <circle cx="9" cy="11.5" r="1.5"/>
-                <circle cx="15" cy="11.5" r="1.5"/>
-                <path d="M8.5 15.5c1.5 1 5.5 1 7 0" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/>
-              </svg>
-            </div>
-            <div className="f1-social-btn" title="Facebook">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M18 2h-3a5 5 0 0 0-5 5v3H7v4h3v8h4v-8h3l1-4h-4V7a1 1 0 0 1 1-1h3z"/>
-              </svg>
-            </div>
-          </div>
-        </div>
-
-        {/* New Liveries Feature Card */}
-        <div 
-          className="f1-feature-card"
-          onClick={() => onNavigate('leaderboard')}
-          title="Ver Equipos y Monoplazas 2026"
-        >
-          <div className="f1-feature-info">
-            <span className="f1-feature-tag">2026</span>
-            <h3 className="f1-feature-title">{t('new_liveries_title')}</h3>
-          </div>
-
-          <div className="f1-feature-graphic">
-            <svg viewBox="0 0 160 80" width="100%" height="100%">
-              <defs>
-                <linearGradient id="carGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                  <stop offset="0%" stopColor="#E10600" />
-                  <stop offset="50%" stopColor="#00D7B6" />
-                  <stop offset="100%" stopColor="#F47600" />
-                </linearGradient>
-              </defs>
-              <path 
-                d="M 10,48 L 35,46 L 60,32 L 95,30 L 125,40 L 150,44 L 140,55 L 115,55 L 110,48 L 45,48 L 40,55 L 20,55 Z" 
-                fill="url(#carGrad)" 
-                opacity="0.9"
-              />
-              <circle cx="32" cy="54" r="11" fill="#0B0F19" stroke="#E2E8F0" strokeWidth="2" />
-              <circle cx="122" cy="54" r="11" fill="#0B0F19" stroke="#E2E8F0" strokeWidth="2" />
-              <path d="M 62,32 L 80,24 L 92,30 Z" fill="#FFFFFF" opacity="0.8" />
-              <path d="M 120,38 L 148,32 L 145,44 Z" fill="#00D7B6" />
-            </svg>
-          </div>
-        </div>
-      </div>
 
       {/* Row 4: 2026 Driver Standings, Constructor Standings & News Feed */}
       <div className="home-row-4">
@@ -362,10 +282,10 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate
             <table className="f1-widget-table">
               <thead>
                 <tr>
-                  <th className="f1-th-pos">POS.</th>
-                  <th>DRIVER</th>
-                  <th className="f1-th-pts">POINTS</th>
-                  <th className="f1-th-evo">EVO.</th>
+                  <th className="f1-th-pos">{t('col_pos')}</th>
+                  <th>{t('col_driver')}</th>
+                  <th className="f1-th-pts">{t('col_points')}</th>
+                  <th className="f1-th-evo">{t('col_evo')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -406,10 +326,10 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate
             <table className="f1-widget-table">
               <thead>
                 <tr>
-                  <th className="f1-th-pos">POS.</th>
-                  <th>CONSTRUCTOR</th>
-                  <th className="f1-th-pts">POINTS</th>
-                  <th className="f1-th-evo">EVO.</th>
+                  <th className="f1-th-pos">{t('col_pos')}</th>
+                  <th>{t('col_constructor')}</th>
+                  <th className="f1-th-pts">{t('col_points')}</th>
+                  <th className="f1-th-evo">{t('col_evo')}</th>
                 </tr>
               </thead>
               <tbody>

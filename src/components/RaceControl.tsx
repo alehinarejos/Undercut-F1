@@ -286,37 +286,37 @@ export const RaceControl: React.FC<RaceControlProps> = ({
             className={`f1dash-chip ${selectedFilter === 'all' ? 'active' : ''}`}
             onClick={() => setSelectedFilter('all')}
           >
-            All <span className="chip-cnt">{filterCounts.all}</span>
+            {t('filter_all_badge')} <span className="chip-cnt">{filterCounts.all}</span>
           </button>
           <button
             className={`f1dash-chip chip-flags ${selectedFilter === 'flags' ? 'active' : ''}`}
             onClick={() => setSelectedFilter('flags')}
           >
-            Flags <span className="chip-cnt">{filterCounts.flags}</span>
+            {t('filter_flags')} <span className="chip-cnt">{filterCounts.flags}</span>
           </button>
           <button
             className={`f1dash-chip chip-limits ${selectedFilter === 'limits' ? 'active' : ''}`}
             onClick={() => setSelectedFilter('limits')}
           >
-            Limits <span className="chip-cnt">{filterCounts.limits}</span>
+            {t('filter_limits')} <span className="chip-cnt">{filterCounts.limits}</span>
           </button>
           <button
             className={`f1dash-chip chip-sc ${selectedFilter === 'sc' ? 'active' : ''}`}
             onClick={() => setSelectedFilter('sc')}
           >
-            SC/VSC <span className="chip-cnt">{filterCounts.sc}</span>
+            {t('filter_sc')} <span className="chip-cnt">{filterCounts.sc}</span>
           </button>
           <button
             className={`f1dash-chip chip-pit ${selectedFilter === 'pit' ? 'active' : ''}`}
             onClick={() => setSelectedFilter('pit')}
           >
-            Pit Lane <span className="chip-cnt">{filterCounts.pit}</span>
+            {t('filter_pit')} <span className="chip-cnt">{filterCounts.pit}</span>
           </button>
           <button
             className={`f1dash-chip chip-info ${selectedFilter === 'info' ? 'active' : ''}`}
             onClick={() => setSelectedFilter('info')}
           >
-            Info <span className="chip-cnt">{filterCounts.info}</span>
+            {t('filter_info')} <span className="chip-cnt">{filterCounts.info}</span>
           </button>
         </div>
       )}
@@ -327,7 +327,7 @@ export const RaceControl: React.FC<RaceControlProps> = ({
           filteredMessages.length === 0 ? (
             <div className="f1dash-empty-state">
               <Info size={18} opacity={0.5} />
-              <span>No hay mensajes en esta categoría</span>
+              <span>{t('no_rc_messages')}</span>
             </div>
           ) : (
             filteredMessages.map((msg) => {
@@ -378,7 +378,7 @@ export const RaceControl: React.FC<RaceControlProps> = ({
           radios.length === 0 ? (
             <div className="f1dash-empty-state">
               <Radio size={18} opacity={0.5} />
-              <span>No hay mensajes de radio disponibles</span>
+              <span>{t('no_radios_available')}</span>
             </div>
           ) : (
             radios.map((radio) => {
@@ -400,7 +400,7 @@ export const RaceControl: React.FC<RaceControlProps> = ({
                         {radio.driver.code} #{radio.driver.number}
                       </strong>
                       <span className="f1dash-radio-speaker">
-                        [{radio.speaker === 'Driver' ? 'PILOTO' : 'INGENIERO'}]
+                        [{radio.speaker === 'Driver' ? t('speaker_driver') : t('speaker_engineer')}]
                       </span>
                     </div>
 
@@ -443,7 +443,7 @@ export const RaceControl: React.FC<RaceControlProps> = ({
                         ))}
                       </div>
                       <span className="f1dash-audio-live-tag">
-                        TRANSMITIENDO AUDIO
+                        {t('audio_broadcasting')}
                       </span>
                     </div>
                   )}

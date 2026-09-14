@@ -1,7 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import type { SessionState, RaceControlMessage } from '../types/telemetry';
 import type { SignalRConnectionStatus } from '../services/f1SignalRClient';
-import { scheduleSyncService, getGrandPrixTimeline } from '../services/scheduleSyncService';
+import { 
+  scheduleSyncService, 
+  getGrandPrixTimeline, 
+  getNextUpcomingGrandPrix, 
+  getRaceTargetTimestamp 
+} from '../services/scheduleSyncService';
 import type { ScheduleSyncState } from '../services/scheduleSyncService';
 import { useLanguage } from '../context/LanguageContext';
 import { LanguageSelector } from './LanguageSelector';
@@ -39,7 +44,7 @@ export const Header: React.FC<HeaderProps> = ({
   trackStatus,
   raceControlMessages = [],
 }) => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const isStreaming = signalRStatus === 'live_streaming' || isOfficialLive;
   const isConnected = signalRStatus === 'connected' || signalRStatus === 'live_streaming';
 
@@ -66,16 +71,16 @@ export const Header: React.FC<HeaderProps> = ({
     return () => clearInterval(timer);
   }, []);
 
-  const upcomingGp = scheduleState.schedule.find(g => !g.completed) || scheduleState.schedule[15];
+  const upcomingGp = getNextUpcomingGrandPrix(scheduleState.schedule);
   const timeline = getGrandPrixTimeline(upcomingGp);
 
   const activeTimelineSession = timeline.activeSession;
   const lastFinishedSession = timeline.lastCompletedSession;
-  const nextTargetSession = timeline.nextSession || upcomingGp.sessions[0];
+  const nextTargetSession = timeline.nextSession || upcomingGp.sessions.find(s => s.type === 'Race') || upcomingGp.sessions[0];
 
   const targetStartTime = nextTargetSession 
     ? (typeof nextTargetSession === 'object' && 'startTime' in nextTargetSession ? (nextTargetSession as any).startTime : new Date((nextTargetSession as any).startTimeUtc).getTime())
-    : new Date(`${upcomingGp.startDate}T11:30:00Z`).getTime();
+    : getRaceTargetTimestamp(upcomingGp);
 
   // Helper to format next session day and time
   const formatNextSessionInfo = (item: any): string => {
@@ -88,7 +93,13 @@ export const Header: React.FC<HeaderProps> = ({
       ? new Date(item.session.startTimeUtc) 
       : null;
     if (!dateObj || isNaN(dateObj.getTime())) return '';
-    const dayNames = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+    const dayNamesByLang: Record<string, string[]> = {
+      es: ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'],
+      en: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'],
+      fr: ['Dim', 'Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam'],
+      it: ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'],
+    };
+    const dayNames = dayNamesByLang[language] || dayNamesByLang.en;
     const day = dayNames[dateObj.getDay()];
     const hours = dateObj.getHours().toString().padStart(2, '0');
     const minutes = dateObj.getMinutes().toString().padStart(2, '0');
@@ -104,13 +115,15 @@ export const Header: React.FC<HeaderProps> = ({
       .replace(/\s*202[0-9]/, '');
   };
 
-  // Track status is Chequered
-  const isChequered = session.trackStatus === 'CHEQUERED';
+  // Maximum cooldown for Chequered Flag display: 90 minutes after session finish
+  const isRecentFinish = session.finishedAtMs 
+    ? (nowMs - session.finishedAtMs) < 90 * 60 * 1000
+    : false;
+
+  const isChequered = session.trackStatus === 'CHEQUERED' && isRecentFinish;
 
   const isLiveActive = !isChequered && (
-    session.type === 'RACE' ||
-    (session.totalLaps !== undefined && session.totalLaps > 0) ||
-    activeTimelineSession != null ||
+    (activeTimelineSession != null && activeTimelineSession.status === 'live') ||
     (isOfficialLive && isStreaming && session.trackStatus !== 'CHEQUERED')
   );
 
@@ -174,15 +187,25 @@ export const Header: React.FC<HeaderProps> = ({
             <span className="hamburger-text">MENÚ</span>
           </button>
 
-          <div className="f1-logo-badge" style={{ letterSpacing: '0.02em', padding: '3px 7px', fontSize: '0.92rem', fontWeight: 900 }}>
-            UC
-          </div>
-          <div className="app-title-group">
-            <span className="app-name" style={{ letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '4px' }}>
-              UNDERCUT <span style={{ color: 'var(--f1-red)', fontSize: '0.82em', fontWeight: 900 }}>F1</span>
-            </span>
-            <span className="app-subtitle">{t('app_subtitle')}</span>
-          </div>
+          <a 
+            href="/"
+            onClick={(e) => {
+              e.preventDefault();
+              setActiveTab('home');
+            }}
+            style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+            title="Ir a Inicio / Dashboard"
+          >
+            <div className="f1-logo-badge" style={{ letterSpacing: '0.02em', padding: '3px 7px', fontSize: '0.92rem', fontWeight: 900 }}>
+              UC
+            </div>
+            <div className="app-title-group">
+              <span className="app-name" style={{ letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                UNDERCUT <span style={{ color: 'var(--f1-red)', fontSize: '0.82em', fontWeight: 900 }}>F1</span>
+              </span>
+              <span className="app-subtitle">{t('app_subtitle')}</span>
+            </div>
+          </a>
         </div>
 
         {/* Center Group: Session Pill & Compact Track Flag Indicator */}
@@ -335,7 +358,7 @@ export const Header: React.FC<HeaderProps> = ({
           </div>
 
           <TrackFlagIndicator
-            trackStatus={session.trackStatus || trackStatus || 'GREEN'}
+            trackStatus={isChequered ? 'CHEQUERED' : isLiveActive ? (session.trackStatus || trackStatus || 'GREEN') : 'GREEN'}
             messages={raceControlMessages}
           />
         </div>
@@ -463,6 +486,7 @@ export const Header: React.FC<HeaderProps> = ({
         setActiveTab={setActiveTab}
         session={session}
         isOfficialLive={isOfficialLive}
+        isLiveActive={isLiveActive}
       />
     </header>
   );

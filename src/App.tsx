@@ -23,6 +23,12 @@ import { HomeDashboardView } from './components/HomeDashboardView';
 import { OfficialLeaderboardView } from './components/OfficialLeaderboardView';
 import { F1_SCHEDULE } from './data/schedule';
 import { useLanguage } from './context/LanguageContext';
+import { 
+  getRouteFromPathname, 
+  getPathnameForRoute, 
+  updateSeoMetadata, 
+  type AppRoute 
+} from './utils/seoManager';
 
 import './styles/global.css';
 import './styles/dashboard.css';
@@ -35,7 +41,7 @@ import './styles/home-layout.css';
 import './styles/sidebar-drawer.css';
 
 export const App: React.FC = () => {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   // Telemetry Engine (connected to realistic data stream & official fallback)
   const engineRef = useRef<TelemetryEngine | null>(null);
 
@@ -44,8 +50,49 @@ export const App: React.FC = () => {
   }
   const engine = engineRef.current;
 
-  // Active tab: 'home' matches formula1dashboard main dashboard
-  const [activeTab, setActiveTab] = useState<'home' | 'timing' | 'leaderboard' | 'schedule'>('home');
+  // Active tab: synchronized with URL pathname for SEO and direct deep links
+  const [activeTab, setActiveTabState] = useState<AppRoute>(() => {
+    if (typeof window !== 'undefined') {
+      return getRouteFromPathname(window.location.pathname);
+    }
+    return 'home';
+  });
+
+  // Navigate function that updates URL without full page reload & updates SEO
+  const setActiveTab = (tab: AppRoute) => {
+    setActiveTabState(tab);
+    if (typeof window !== 'undefined') {
+      const newPath = getPathnameForRoute(tab);
+      const search = window.location.search; // preserve ?lang=...
+      const targetUrl = search ? `${newPath}${search}` : newPath;
+      if (window.location.pathname !== newPath) {
+        window.history.pushState(null, '', targetUrl);
+      }
+      updateSeoMetadata(tab, language);
+    }
+  };
+
+  // Listen to browser Back/Forward (popstate) navigation
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handlePopState = () => {
+      const route = getRouteFromPathname(window.location.pathname);
+      setActiveTabState(route);
+      updateSeoMetadata(route, language);
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    // Initial SEO metadata update on mount
+    updateSeoMetadata(activeTab, language);
+
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [language]);
+
+  // Update SEO metadata whenever active tab or language changes
+  useEffect(() => {
+    updateSeoMetadata(activeTab, language);
+  }, [activeTab, language]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -80,10 +127,12 @@ export const App: React.FC = () => {
     if (typeof window !== 'undefined') {
       try {
         const savedFinished = localStorage.getItem('f1_session_finished_at_ms');
-        if (savedFinished && base.trackStatus === 'CHEQUERED') {
+        if (savedFinished) {
           const parsed = Number(savedFinished);
-          if (!isNaN(parsed) && parsed > 0) {
+          if (!isNaN(parsed) && parsed > 0 && (Date.now() - parsed) < 90 * 60 * 1000) {
             return { ...base, finishedAtMs: parsed };
+          } else {
+            localStorage.removeItem('f1_session_finished_at_ms');
           }
         }
       } catch {}
@@ -397,21 +446,26 @@ export const App: React.FC = () => {
       if (isFinished) {
         setIsOfficialLive(false);
         setSignalRStatus('connected');
-        setSignalRDetails('Sesión finalizada (Bandera a cuadros)');
+        setSignalRDetails('Sesión finalizada');
         engine.setSessionEnded(true);
         const parsedFinishedTime = status.finishedUtc ? new Date(status.finishedUtc).getTime() : undefined;
+        const now = Date.now();
+        const finishedAtMs = (parsedFinishedTime && !isNaN(parsedFinishedTime)) ? parsedFinishedTime : now;
+        const isRecent = (now - finishedAtMs) < 90 * 60 * 1000;
+
         setSession(prev => {
-          const finishedAtMs = prev.finishedAtMs || (parsedFinishedTime && !isNaN(parsedFinishedTime) ? parsedFinishedTime : Date.now());
-          try {
-            if (typeof window !== 'undefined') {
-              localStorage.setItem('f1_session_finished_at_ms', String(finishedAtMs));
-            }
-          } catch {}
+          if (isRecent) {
+            try {
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('f1_session_finished_at_ms', String(finishedAtMs));
+              }
+            } catch {}
+          }
           return {
             ...prev,
-            trackStatus: 'CHEQUERED',
+            trackStatus: isRecent ? 'CHEQUERED' : 'GREEN',
             timeRemainingSec: 0,
-            finishedAtMs,
+            finishedAtMs: isRecent ? finishedAtMs : undefined,
           };
         });
       } else if (isLiveOnTrack) {

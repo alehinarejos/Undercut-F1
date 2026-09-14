@@ -191,6 +191,15 @@
   text-align: left;
   width: 100%;
   box-sizing: border-box;
+  text-decoration: none;
+  color: inherit;
+}
+
+.sidebar-nav-item:hover,
+.sidebar-nav-item:focus,
+.sidebar-nav-item:visited {
+  text-decoration: none;
+  color: inherit;
 }
 
 .sidebar-nav-item:hover {
