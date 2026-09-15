@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
 import type { LeaderboardEntry } from '../types/telemetry';
-import { useLanguage } from '../context/LanguageContext';
 import { TeamLogo } from './TeamLogo';
 
 // Helper to parse lap time to seconds for finding fastest lap
@@ -116,10 +115,10 @@ function MiniSectorGroup({
         marginTop: '2px',
         whiteSpace: 'nowrap',
       }}>
-        {/* Último sector */}
+        {/* Last sector */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
           <span style={{ fontSize: '0.55rem', fontFamily: 'var(--font-mono)', color: '#64748b', fontWeight: 800 }}>
-            ÚLT
+            LAST
           </span>
           <span style={{
             fontFamily: 'var(--font-mono)',
@@ -134,10 +133,10 @@ function MiniSectorGroup({
 
         <span style={{ color: 'rgba(255, 255, 255, 0.25)', fontSize: '0.70rem' }}>·</span>
 
-        {/* Mejor sector */}
+        {/* Best sector */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
           <span style={{ fontSize: '0.55rem', fontFamily: 'var(--font-mono)', color: '#c084fc', fontWeight: 800 }}>
-            MEJ
+            BEST
           </span>
           <span style={{
             fontFamily: 'var(--font-mono)',
@@ -169,7 +168,6 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
   isQualifying = false,
   sessionType: _sessionType = 'PRACTICE',
 }) => {
-  const { t } = useLanguage();
   const [viewMode, setViewMode] = useState<'timing' | 'stints'>('timing');
 
   // Overtake tracking & animations
@@ -278,7 +276,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
             marginLeft: '6px',
           }}>
             <span style={{ fontSize: '0.62rem', fontWeight: 800, color: '#ff4d4d', letterSpacing: '0.5px' }}>
-              {t('lap_upper')}
+              LAP
             </span>
             <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 900, fontSize: '0.86rem', color: '#ffffff' }}>
               {currentRaceLap}
@@ -332,7 +330,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <div className="f1-badge badge-green" style={{ fontSize: '0.62rem', padding: '2px 8px' }}>
-            {t('official_fia')}
+            OFFICIAL FIA TIMING
           </div>
         </div>
       </div>
@@ -346,7 +344,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
         <span className="col-header-center">LAST</span>
         <span className="col-header-center">BEST</span>
         <span className="col-header-center" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px' }}>
-          MINI-SECTORS (ÚLT / MEJ) <span style={{ fontSize: '0.55rem', opacity: 0.6 }}>ⓘ</span>
+          MINI-SECTORS (LAST / BEST) <span style={{ fontSize: '0.55rem', opacity: 0.6 }}>ⓘ</span>
         </span>
         <span className="col-header-center">LAPS</span>
         <span className="col-header-center">PIT</span>
@@ -358,7 +356,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
         <div className="overtake-alert-banner">
           <span className="overtake-lightning">⚡</span>
           <span className="overtake-alert-text">
-            <strong>ADELANTAMIENTO:</strong> {overtakeToast.gained} sube a la <strong>P{overtakeToast.pos}</strong> (+1) sobre {overtakeToast.lost}
+            <strong>OVERTAKE:</strong> {overtakeToast.gained} moves up to <strong>P{overtakeToast.pos}</strong> (+1) over {overtakeToast.lost}
           </span>
         </div>
       )}
@@ -371,8 +369,8 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
           const showQ2Divider = isQualifying && index === 10;
 
           const isLeader = index === 0;
-          const displayedGap = isLeader ? '—' : (entry.gapToLeader ? entry.gapToLeader.replace('LÍDER', '—') : '—');
-          const displayedInt = isLeader ? '—' : (entry.gapToAhead ? entry.gapToAhead.replace('LEADER', '—') : '—');
+          const displayedGap = isLeader ? '—' : (entry.gapToLeader ? entry.gapToLeader.replace('LÍDER', 'LEADER').replace('LIDER', 'LEADER') : '—');
+          const displayedInt = isLeader ? '—' : (entry.gapToAhead ? entry.gapToAhead.replace('LÍDER', 'LEADER').replace('LIDER', 'LEADER') : '—');
           const displayLast = entry.lastLapTime && entry.lastLapTime !== '--:--.---' ? entry.lastLapTime : (entry.currentLapTime || '—');
           const displayBest = entry.bestLapTime && entry.bestLapTime !== '--:--.---' ? entry.bestLapTime : '—';
           
@@ -425,16 +423,16 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
               {/* Qualy Q2 Cutoff */}
               {showQ2Divider && (
                 <div className="cutoff-divider">
-                  <span>{t('q2_cutoff_banner')}</span>
-                  <span>{t('elimination')}</span>
+                  <span>Q2 ELIMINATION CUTOFF</span>
+                  <span>ELIMINATION</span>
                 </div>
               )}
 
               {/* Qualy Q1 Cutoff */}
               {showQ1Divider && (
                 <div className="cutoff-divider">
-                  <span>{t('q1_cutoff_banner')}</span>
-                  <span>{t('elimination')}</span>
+                  <span>Q1 ELIMINATION CUTOFF</span>
+                  <span>ELIMINATION</span>
                 </div>
               )}
 
@@ -453,12 +451,12 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                     {entry.position}
                   </span>
                   {isOvertakeUp && (
-                    <span className="overtake-pill-gain" title={`Adelantamiento: +${ot.diff}`}>
+                    <span className="overtake-pill-gain" title={`Overtake: +${ot.diff}`}>
                       ▲ +{ot.diff}
                     </span>
                   )}
                   {isOvertakeDown && (
-                    <span className="overtake-pill-loss" title={`Posición perdida: -${ot.diff}`}>
+                    <span className="overtake-pill-loss" title={`Position lost: -${ot.diff}`}>
                       ▼ -{ot.diff}
                     </span>
                   )}

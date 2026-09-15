@@ -94,7 +94,7 @@ export const FastestBySector: React.FC<FastestBySectorProps> = ({ entries }) => 
             fontFamily: 'var(--font-display)',
             letterSpacing: '0.02em',
           }}>
-            Más Rápido por Sector
+            Fastest by Sector
           </span>
         </div>
         <span style={{
@@ -279,7 +279,7 @@ export const FastestBySector: React.FC<FastestBySectorProps> = ({ entries }) => 
               fontFamily: 'var(--font-mono)',
               textTransform: 'uppercase',
             }}>
-              Vuelta Óptima Teórica
+              Optimal Theoretical Lap
             </span>
           </div>
           <span style={{

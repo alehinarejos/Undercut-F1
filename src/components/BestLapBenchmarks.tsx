@@ -137,12 +137,12 @@ export const BestLapBenchmarks: React.FC<BestLapBenchmarksProps> = ({
             Best Lap Benchmarks
           </span>
         </div>
-        <span title="Puntos de referencia de tiempos oficiales" style={{ display: 'inline-flex', cursor: 'pointer' }}>
+        <span title="Official timing benchmarks" style={{ display: 'inline-flex', cursor: 'pointer' }}>
           <HelpCircle size={15} color="#64748b" />
         </span>
       </div>
 
-      {/* 1. MEJOR VUELTA DE ESA SESIÓN (Session Best - Morado) */}
+      {/* 1. Session Best Lap (Purple) */}
       <div style={{
         background: 'linear-gradient(135deg, rgba(211, 84, 255, 0.14) 0%, rgba(147, 51, 234, 0.07) 100%)',
         border: '1.5px solid rgba(211, 84, 255, 0.35)',
@@ -167,7 +167,7 @@ export const BestLapBenchmarks: React.FC<BestLapBenchmarksProps> = ({
               letterSpacing: '0.08em',
               textTransform: 'uppercase',
             }}>
-              MEJOR VUELTA DE LA SESIÓN
+              SESSION BEST LAP
             </span>
           </div>
           <span style={{
@@ -179,7 +179,7 @@ export const BestLapBenchmarks: React.FC<BestLapBenchmarksProps> = ({
             borderRadius: '3px',
             fontFamily: 'var(--font-mono)',
           }}>
-            P1 ACTUAL
+            CURRENT P1
           </span>
         </div>
 
@@ -222,7 +222,7 @@ export const BestLapBenchmarks: React.FC<BestLapBenchmarksProps> = ({
         </div>
       </div>
 
-      {/* 2. MEJOR VUELTA DE TODAS LAS SESIONES DE ESE FINDE (Weekend Fastest Lap) */}
+      {/* 2. Weekend Fastest Lap */}
       <div style={{
         background: 'rgba(255, 255, 255, 0.03)',
         border: '1px solid rgba(255, 255, 255, 0.06)',
@@ -243,7 +243,7 @@ export const BestLapBenchmarks: React.FC<BestLapBenchmarksProps> = ({
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
             }}>
-              MEJOR VUELTA DEL FIN DE SEMANA
+              WEEKEND FASTEST LAP
             </span>
           </div>
           <span style={{
@@ -255,7 +255,7 @@ export const BestLapBenchmarks: React.FC<BestLapBenchmarksProps> = ({
             borderRadius: '3px',
             fontWeight: 700,
           }}>
-            FINDE COMPLETO
+            FULL WEEKEND
           </span>
         </div>
 
@@ -270,7 +270,7 @@ export const BestLapBenchmarks: React.FC<BestLapBenchmarksProps> = ({
         </span>
       </div>
 
-      {/* 3. VUELTA MÁS RÁPIDA DE ESE CIRCUITO (Circuit All-Time Record) */}
+      {/* 3. Circuit All-Time Record */}
       <div style={{
         background: 'rgba(255, 255, 255, 0.03)',
         border: '1px solid rgba(255, 255, 255, 0.06)',
@@ -291,7 +291,7 @@ export const BestLapBenchmarks: React.FC<BestLapBenchmarksProps> = ({
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
             }}>
-              RÉCORD HISTÓRICO DEL CIRCUITO
+              CIRCUIT ALL-TIME RECORD
             </span>
           </div>
           <span style={{
@@ -303,7 +303,7 @@ export const BestLapBenchmarks: React.FC<BestLapBenchmarksProps> = ({
             borderRadius: '3px',
             fontWeight: 700,
           }}>
-            HISTÓRICO
+            ALL-TIME
           </span>
         </div>
 
