@@ -17,6 +17,7 @@ export interface LiveCarTelemetry {
 
 export const STORAGE_LIVE_LEADERBOARD_KEY = 'f1_official_latest_session_v4';
 export const STORAGE_SESSION_BEST_SECTORS_KEY = 'f1_session_best_sectors_v4';
+export const STORAGE_ACTIVE_SESSION_KEY = 'f1_active_session_key_v4';
 
 export interface RawF1TimingLine {
   Position?: string;
@@ -128,6 +129,7 @@ export class F1LiveWebSocketService {
   private currentLeaderboard: LeaderboardEntry[] = [];
   private currentCarData: Map<number, LiveCarTelemetry> = new Map();
   private lastEmitTime = 0;
+  private activeSessionKey: string | null = null;
 
   // Session lifecycle state
   private currentSessionStatus: F1LiveSessionStatus = {
@@ -136,8 +138,52 @@ export class F1LiveWebSocketService {
   };
 
   constructor() {
+    if (typeof window !== 'undefined') {
+      try {
+        this.activeSessionKey = localStorage.getItem(STORAGE_ACTIVE_SESSION_KEY);
+      } catch {}
+    }
     this.loadBestSectorsFromStorage();
     this.currentLeaderboard = this.loadFromStorage();
+  }
+
+  public resetForNewSession(
+    sessionKey: string,
+    sessionName?: string,
+    sessionType?: string,
+    remainingSec?: number
+  ): void {
+    const storedKey = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_ACTIVE_SESSION_KEY) : this.activeSessionKey;
+    const isDifferentSession = sessionKey && (this.activeSessionKey !== sessionKey || storedKey !== sessionKey);
+
+    this.activeSessionKey = sessionKey;
+    if (isDifferentSession) {
+      this.cachedTimingLines.clear();
+      this.cachedBestSectors.clear();
+      this.currentLeaderboard = [];
+      this.currentCarData.clear();
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem(STORAGE_LIVE_LEADERBOARD_KEY);
+          localStorage.removeItem(STORAGE_SESSION_BEST_SECTORS_KEY);
+          localStorage.setItem(STORAGE_ACTIVE_SESSION_KEY, sessionKey);
+        } catch {}
+      }
+    }
+
+    this.clockBaseRemainingSec = remainingSec !== undefined ? remainingSec : null;
+    this.clockBaseUtcMs = Date.now();
+    this.currentSessionStatus = {
+      sessionName: sessionName || this.currentSessionStatus.sessionName,
+      sessionType: sessionType || this.currentSessionStatus.sessionType,
+      sessionStatus: 'Started',
+      remainingSec: remainingSec !== undefined ? remainingSec : this.currentSessionStatus.remainingSec,
+      isFinished: false,
+      isChequered: false,
+      isExtrapolating: true,
+      isStopped: false,
+    };
+    this.notifySessionStatus();
   }
 
   public getSessionStatus(): F1LiveSessionStatus {
@@ -480,6 +526,16 @@ export class F1LiveWebSocketService {
       }
     }
 
+    const incomingName = data.Name || '';
+    const incomingType = data.Type || '';
+    const prevName = this.currentSessionStatus.sessionName || '';
+    const hasSessionChanged = Boolean(incomingName && prevName && incomingName !== prevName);
+
+    if (hasSessionChanged) {
+      const wsKey = `ws-${data.Key || incomingName}`;
+      this.resetForNewSession(wsKey, incomingName, incomingType);
+    }
+
     let fallbackRemainingSec = this.currentSessionStatus.remainingSec;
     let isAlreadyEndedByClock = false;
     if (this.sessionEndUtcMs) {
@@ -488,18 +544,21 @@ export class F1LiveWebSocketService {
         isAlreadyEndedByClock = true;
         fallbackRemainingSec = 0;
         scheduleSyncService.markSessionFinished(data.Name || data.Type, new Date(this.sessionEndUtcMs).toISOString());
-      } else if ((fallbackRemainingSec === undefined || fallbackRemainingSec <= 0) && !this.currentSessionStatus.isFinished && diffSec <= 4 * 3600) {
-        fallbackRemainingSec = diffSec;
+      } else if (diffSec <= 4 * 3600) {
+        isAlreadyEndedByClock = false;
+        if (fallbackRemainingSec === undefined || fallbackRemainingSec <= 0 || hasSessionChanged) {
+          fallbackRemainingSec = diffSec;
+        }
       }
     }
 
     this.currentSessionStatus = {
       ...this.currentSessionStatus,
-      sessionName: data.Name || this.currentSessionStatus.sessionName,
-      sessionType: data.Type || this.currentSessionStatus.sessionType,
+      sessionName: incomingName || this.currentSessionStatus.sessionName,
+      sessionType: incomingType || this.currentSessionStatus.sessionType,
       remainingSec: fallbackRemainingSec,
-      isFinished: this.currentSessionStatus.isFinished || isAlreadyEndedByClock,
-      isChequered: this.currentSessionStatus.isChequered || isAlreadyEndedByClock,
+      isFinished: isAlreadyEndedByClock,
+      isChequered: isAlreadyEndedByClock,
     };
     this.notifySessionStatus();
   }

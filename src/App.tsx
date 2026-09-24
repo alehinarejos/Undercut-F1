@@ -158,10 +158,6 @@ export const App: React.FC = () => {
   // Returns the currently active session (if any) or null based on real UTC clock and live stream status
   const getCurrentScheduledSession = () => {
     const wsStatus = f1LiveWebSocketService.getSessionStatus();
-    if (wsStatus.isFinished || wsStatus.isChequered) {
-      return null;
-    }
-
     const now = new Date();
     const liveSchedule = scheduleSyncService.getState().schedule || F1_SCHEDULE;
     for (const gp of liveSchedule) {
@@ -173,8 +169,19 @@ export const App: React.FC = () => {
           ? new Date(sess.endTimeUtc)
           : new Date(start.getTime() + durMin * 60 * 1000);
         if (now >= start && now < end) {
+          // Only treat as finished if wsStatus.isFinished is for THIS same session
+          const wsName = (wsStatus.sessionName || '').toLowerCase();
+          const schedName = (sess.name || '').toLowerCase();
+          const schedType = (sess.type || '').toLowerCase();
+          const isSameWsSession = Boolean(
+            wsName && (schedName.includes(wsName) || wsName.includes(schedType) || (wsName.includes('practice 1') && schedType === 'fp1') || (wsName.includes('practice 2') && schedType === 'fp2') || (wsName.includes('practice 3') && schedType === 'fp3'))
+          );
+          if (isSameWsSession && (wsStatus.isFinished || wsStatus.isChequered)) {
+            return null;
+          }
+
           const scheduleRemainingSec = Math.max(0, (end.getTime() - now.getTime()) / 1000);
-          const remainingSec = (wsStatus.remainingSec !== undefined && wsStatus.remainingSec > 0)
+          const remainingSec = (isSameWsSession && wsStatus.remainingSec !== undefined && wsStatus.remainingSec > 0)
             ? wsStatus.remainingSec
             : scheduleRemainingSec;
           return { gp, sess, start, end, durSec: durMin * 60, remainingSec };
@@ -244,12 +251,23 @@ export const App: React.FC = () => {
           activeSessionKeyRef.current = key;
           engine.setCircuit(active.gp.circuitId);
 
-          engine.resetForNewSession(
+          // Reset WebSocket & Engine session caches so previous session times are wiped
+          f1LiveWebSocketService.resetForNewSession(
+            key,
             `${active.gp.name} - ${active.sess.name}`,
-            engineType,
+            active.sess.type,
             active.remainingSec
           );
 
+          engine.resetForNewSession(
+            `${active.gp.name} - ${active.sess.name}`,
+            engineType,
+            active.remainingSec,
+            key
+          );
+
+          setLeaderboard(engine.getLeaderboard());
+          setSession(engine.getSession());
           loadedSessionKeyRef.current = null;
           console.info(`[SessionManager] New session detected: ${active.sess.name} at ${active.gp.name}. Remaining: ${Math.round(active.remainingSec)}s`);
         } else {
