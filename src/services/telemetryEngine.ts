@@ -883,9 +883,9 @@ export class TelemetryEngine {
     };
     if (this.session.type === 'PRACTICE' || this.session.type === 'QUALIFYING') {
       this.session.totalLaps = 0;
-      if (this.session.timeRemainingSec <= 0 && !this.sessionEnded) {
-        this.session.timeRemainingSec = 3000;
-      }
+    }
+    if (partial.timeRemainingSec === 0 || partial.trackStatus === 'CHEQUERED') {
+      this.sessionEnded = true;
     }
     this.emitCurrentState();
   }
@@ -1318,6 +1318,18 @@ export class TelemetryEngine {
     return res;
   }
 
+  private getMicrosectorColor(driverNum: number, lap: number, sectorIdx: number, microIdx: number, isTopDriver: boolean): SectorStatus {
+    const hash = ((driverNum * 31 + lap * 17 + sectorIdx * 13 + microIdx * 7) % 100 + 100) % 100;
+    if (isTopDriver) {
+      if (hash < 45) return 'purple';
+      if (hash < 85) return 'green';
+      return 'yellow';
+    }
+    if (hash < 18) return 'purple';
+    if (hash < 65) return 'green';
+    return 'yellow';
+  }
+
   private updateEntryMicrosectors(entry: LeaderboardEntry, progress: number) {
     const s1Len = 0.3333;
     const s2Len = 0.3333;
@@ -1325,44 +1337,60 @@ export class TelemetryEngine {
     const s2Micro = s2Len / 8;
     const s3Micro = 0.3334 / 9;
 
-    const baseColor: SectorStatus = entry.position <= 2 ? 'purple' : entry.position <= 8 ? 'green' : 'yellow';
+    const lap = entry.lapsCompleted || 1;
+    const dNum = entry.driver.number || 1;
+    const isTop = entry.position <= 3;
+
+    const buildFullSector = (sectorIdx: number, count: number): SectorStatus[] => {
+      const arr: SectorStatus[] = [];
+      for (let i = 0; i < count; i++) {
+        arr.push(this.getMicrosectorColor(dNum, lap, sectorIdx, i, isTop));
+      }
+      return arr;
+    };
 
     if (progress < s1Len) {
-      // S1: each microsector 0..7 lights up progressively
+      // S1 active: microsectors 0..activeIdx lit, remaining S1 and all of S2 & S3 cleared to 'none'
       const activeIdx = Math.min(7, Math.floor(progress / s1Micro));
-      const segs: SectorStatus[] = [];
+      const s1Segs: SectorStatus[] = [];
       for (let i = 0; i < 8; i++) {
-        if (i <= activeIdx) {
-          segs.push((entry.position === 1 && i % 3 !== 1) ? 'purple' : (i % 3 === 0 && entry.position <= 4) ? 'purple' : baseColor);
-        } else {
-          segs.push('none');
-        }
+        s1Segs.push(i <= activeIdx ? this.getMicrosectorColor(dNum, lap, 1, i, isTop) : 'none');
       }
-      entry.s1Segments = segs;
+      entry.s1Segments = s1Segs;
+      entry.s2Segments = Array(8).fill('none');
+      entry.s3Segments = Array(9).fill('none');
+      entry.s1Status = s1Segs.slice(0, activeIdx + 1).includes('purple') ? 'purple' : 'green';
+      entry.s2Status = 'none';
+      entry.s3Status = 'none';
     } else if (progress < s1Len + s2Len) {
-      // S2: each microsector 0..7 lights up progressively
+      // S2 active: S1 completed (all 8 lit), S2 0..activeIdx lit, S3 cleared to 'none'
       const activeIdx = Math.min(7, Math.floor((progress - s1Len) / s2Micro));
-      const segs: SectorStatus[] = [];
+      if (!entry.s1Segments || entry.s1Segments.length < 8 || entry.s1Segments.includes('none')) {
+        entry.s1Segments = buildFullSector(1, 8);
+      }
+      const s2Segs: SectorStatus[] = [];
       for (let i = 0; i < 8; i++) {
-        if (i <= activeIdx) {
-          segs.push((entry.position <= 2 && i % 2 === 0) ? 'purple' : baseColor);
-        } else {
-          segs.push('none');
-        }
+        s2Segs.push(i <= activeIdx ? this.getMicrosectorColor(dNum, lap, 2, i, isTop) : 'none');
       }
-      entry.s2Segments = segs;
+      entry.s2Segments = s2Segs;
+      entry.s3Segments = Array(9).fill('none');
+      entry.s2Status = s2Segs.slice(0, activeIdx + 1).includes('purple') ? 'purple' : 'green';
+      entry.s3Status = 'none';
     } else {
-      // S3: each microsector 0..8 lights up progressively
+      // S3 active: S1 & S2 completed (all 8 lit), S3 0..activeIdx lit
       const activeIdx = Math.min(8, Math.floor((progress - (s1Len + s2Len)) / s3Micro));
-      const segs: SectorStatus[] = [];
-      for (let i = 0; i < 9; i++) {
-        if (i <= activeIdx) {
-          segs.push((entry.position === 1 && i % 2 === 0) ? 'purple' : baseColor);
-        } else {
-          segs.push('none');
-        }
+      if (!entry.s1Segments || entry.s1Segments.length < 8 || entry.s1Segments.includes('none')) {
+        entry.s1Segments = buildFullSector(1, 8);
       }
-      entry.s3Segments = segs;
+      if (!entry.s2Segments || entry.s2Segments.length < 8 || entry.s2Segments.includes('none')) {
+        entry.s2Segments = buildFullSector(2, 8);
+      }
+      const s3Segs: SectorStatus[] = [];
+      for (let i = 0; i < 9; i++) {
+        s3Segs.push(i <= activeIdx ? this.getMicrosectorColor(dNum, lap, 3, i, isTop) : 'none');
+      }
+      entry.s3Segments = s3Segs;
+      entry.s3Status = s3Segs.slice(0, activeIdx + 1).includes('purple') ? 'purple' : 'green';
     }
   }
 

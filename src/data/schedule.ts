@@ -2,6 +2,8 @@ export interface SessionSchedule {
   name: string;
   type: 'FP1' | 'FP2' | 'FP3' | 'Qualifying' | 'Sprint' | 'Sprint Qualifying' | 'Race';
   startTimeUtc: string; // ISO 8601
+  endTimeUtc?: string; // ISO 8601
+  completed?: boolean;
   hasOfficialTime?: boolean;
 }
 
@@ -389,11 +391,11 @@ export const F1_SCHEDULE: GrandPrixEvent[] = [
     endDate: '2026-09-26',
     completed: false,
     sessions: [
-      { name: 'Libres 1 (FP1)', type: 'FP1', startTimeUtc: '2026-09-24T09:00:00Z' },
-      { name: 'Libres 2 (FP2)', type: 'FP2', startTimeUtc: '2026-09-24T13:00:00Z' },
-      { name: 'Libres 3 (FP3)', type: 'FP3', startTimeUtc: '2026-09-25T08:30:00Z' },
-      { name: 'Qualy', type: 'Qualifying', startTimeUtc: '2026-09-25T12:00:00Z' },
-      { name: 'Carrera', type: 'Race', startTimeUtc: '2026-09-26T11:00:00Z' },
+      { name: 'Libres 1 (FP1)', type: 'FP1', startTimeUtc: '2026-09-24T08:30:00Z', endTimeUtc: '2026-09-24T09:30:00Z', completed: true },
+      { name: 'Libres 2 (FP2)', type: 'FP2', startTimeUtc: '2026-09-24T13:00:00Z', endTimeUtc: '2026-09-24T14:00:00Z' },
+      { name: 'Libres 3 (FP3)', type: 'FP3', startTimeUtc: '2026-09-25T08:30:00Z', endTimeUtc: '2026-09-25T09:30:00Z' },
+      { name: 'Qualy', type: 'Qualifying', startTimeUtc: '2026-09-25T12:00:00Z', endTimeUtc: '2026-09-25T13:00:00Z' },
+      { name: 'Carrera', type: 'Race', startTimeUtc: '2026-09-26T11:00:00Z', endTimeUtc: '2026-09-26T13:00:00Z' },
     ],
   },
   {

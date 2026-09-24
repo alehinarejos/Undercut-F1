@@ -3,6 +3,7 @@ import { inflateRaw } from 'pako';
 import type { LeaderboardEntry, SectorStatus, TyreCompound, RaceControlMessage } from '../types/telemetry';
 import { DRIVERS } from '../data/drivers';
 import { standingsSyncService } from './standingsSyncService';
+import { scheduleSyncService } from './scheduleSyncService';
 
 export interface LiveCarTelemetry {
   driverNumber: number;
@@ -448,6 +449,9 @@ export class F1LiveWebSocketService {
   private processSessionInfo(data: any): void {
     if (!data || typeof data !== 'object') return;
 
+    // Sync official start/end times to scheduleSyncService immediately
+    scheduleSyncService.updateFromSignalRSessionInfo(data);
+
     // Parse EndDate + GmtOffset to calculate fallback remaining time
     if (data.EndDate) {
       const endDateStr = String(data.EndDate);
@@ -467,9 +471,14 @@ export class F1LiveWebSocketService {
     }
 
     let fallbackRemainingSec = this.currentSessionStatus.remainingSec;
-    if (this.sessionEndUtcMs && (fallbackRemainingSec === undefined || fallbackRemainingSec <= 0)) {
+    let isAlreadyEndedByClock = false;
+    if (this.sessionEndUtcMs) {
       const diffSec = Math.floor((this.sessionEndUtcMs - Date.now()) / 1000);
-      if (diffSec > 0 && diffSec <= 4 * 3600) {
+      if (diffSec <= 0) {
+        isAlreadyEndedByClock = true;
+        fallbackRemainingSec = 0;
+        scheduleSyncService.markSessionFinished(data.Name || data.Type, new Date(this.sessionEndUtcMs).toISOString());
+      } else if ((fallbackRemainingSec === undefined || fallbackRemainingSec <= 0) && !this.currentSessionStatus.isFinished && diffSec <= 4 * 3600) {
         fallbackRemainingSec = diffSec;
       }
     }
@@ -479,13 +488,15 @@ export class F1LiveWebSocketService {
       sessionName: data.Name || this.currentSessionStatus.sessionName,
       sessionType: data.Type || this.currentSessionStatus.sessionType,
       remainingSec: fallbackRemainingSec,
+      isFinished: this.currentSessionStatus.isFinished || isAlreadyEndedByClock,
+      isChequered: this.currentSessionStatus.isChequered || isAlreadyEndedByClock,
     };
     this.notifySessionStatus();
   }
 
   private processSessionData(data: any): void {
     if (!data || typeof data !== 'object') return;
-    let status: 'Started' | 'Finished' | 'Inactive' | 'Aborted' | undefined = undefined;
+    let status: string | undefined = undefined;
     let finishedUtc: string | undefined = undefined;
 
     if (Array.isArray(data.StatusSeries)) {
@@ -493,7 +504,9 @@ export class F1LiveWebSocketService {
         const item = data.StatusSeries[i];
         if (item && item.SessionStatus) {
           status = item.SessionStatus;
-          if (status === 'Finished') finishedUtc = item.Utc;
+          if (status === 'Finished' || status === 'Finalised' || status === 'Ends') {
+            finishedUtc = item.Utc;
+          }
           break;
         }
       }
@@ -502,11 +515,26 @@ export class F1LiveWebSocketService {
     }
 
     if (status) {
-      const isFinished = status === 'Finished';
+      const isFinished =
+        status === 'Finished' ||
+        status === 'Finalised' ||
+        status === 'Ends' ||
+        status === 'Aborted';
+
+      if (isFinished) {
+        this.clockBaseRemainingSec = 0;
+        scheduleSyncService.markSessionFinished(
+          this.currentSessionStatus.sessionName || this.currentSessionStatus.sessionType,
+          finishedUtc
+        );
+      }
+
       this.currentSessionStatus = {
         ...this.currentSessionStatus,
-        sessionStatus: status,
+        sessionStatus: (isFinished ? 'Finished' : status) as any,
         finishedUtc: finishedUtc || this.currentSessionStatus.finishedUtc,
+        remainingSec: isFinished ? 0 : this.currentSessionStatus.remainingSec,
+        remaining: isFinished ? '00:00:00' : this.currentSessionStatus.remaining,
         isFinished,
         isChequered: isFinished,
       };
@@ -546,22 +574,31 @@ export class F1LiveWebSocketService {
       this.clockBaseUtcMs = Date.now();
     }
 
-    // Fallback to SessionInfo EndDate if clock is 0 but session is Started and within window
-    if (remainingSec <= 0 && this.currentSessionStatus.sessionStatus === 'Started' && this.sessionEndUtcMs) {
-      const diffSec = Math.floor((this.sessionEndUtcMs - Date.now()) / 1000);
-      if (diffSec > 0 && diffSec <= 4 * 3600) {
-        remainingSec = diffSec;
-      }
+    const clockReachedZero =
+      remainingStr === '00:00:00' ||
+      remainingStr === '00:00' ||
+      (baseRemainingSec > 0 && remainingSec === 0);
+
+    const isFinished =
+      this.currentSessionStatus.sessionStatus === 'Finished' ||
+      this.currentSessionStatus.isFinished ||
+      clockReachedZero;
+
+    if (isFinished) {
+      remainingSec = 0;
+      this.clockBaseRemainingSec = 0;
+      scheduleSyncService.markSessionFinished(
+        this.currentSessionStatus.sessionName || this.currentSessionStatus.sessionType
+      );
     }
 
-    const isFinished = this.currentSessionStatus.sessionStatus === 'Finished' || (remainingStr === '00:00:00' && remainingSec <= 0 && this.currentSessionStatus.sessionStatus !== 'Started');
     const isRedFlag = this.currentSessionStatus.trackStatus === '5';
-    const isStopped = !isExtrapolating || isRedFlag;
+    const isStopped = !isExtrapolating || isRedFlag || isFinished;
     this.currentSessionStatus = {
       ...this.currentSessionStatus,
-      remaining: remainingStr,
+      remaining: isFinished ? '00:00:00' : remainingStr,
       remainingSec,
-      isExtrapolating,
+      isExtrapolating: isFinished ? false : isExtrapolating,
       isStopped,
       isFinished,
       isChequered: isFinished,
@@ -764,16 +801,52 @@ export class F1LiveWebSocketService {
             ? [...curSec.Segments]
             : curSec.Segments ? Object.values(curSec.Segments) : [];
 
+          let maxActiveDeltaIdx = -1;
           if (Array.isArray(deltaSec.Segments)) {
             mergedSec.Segments = deltaSec.Segments;
+            deltaSec.Segments.forEach((seg: any, sIdx: number) => {
+              const st = seg && typeof seg === 'object' ? seg.Status : seg;
+              if (st === 2048 || st === 2049 || st === 2051 || st === 2064) {
+                maxActiveDeltaIdx = Math.max(maxActiveDeltaIdx, sIdx);
+              }
+            });
           } else if (typeof deltaSec.Segments === 'object') {
             for (const [segIdx, segVal] of Object.entries(deltaSec.Segments)) {
               const sNum = Number(segIdx);
               if (Number.isFinite(sNum)) {
                 curSegs[sNum] = segVal as any;
+                const st = segVal && typeof segVal === 'object' ? (segVal as any).Status : segVal;
+                if (st === 2048 || st === 2049 || st === 2051 || st === 2064) {
+                  maxActiveDeltaIdx = Math.max(maxActiveDeltaIdx, sNum);
+                }
+              }
+            }
+            // Clear trailing segments from previous lap in this sector
+            if (maxActiveDeltaIdx >= 0) {
+              for (let clearIdx = maxActiveDeltaIdx + 1; clearIdx < curSegs.length; clearIdx++) {
+                curSegs[clearIdx] = { Status: 0 };
               }
             }
             mergedSec.Segments = curSegs;
+          }
+
+          // When starting a new lap in S1 (microsectors 0..2), clear S2 and S3 from previous lap
+          const dSectors = delta.Sectors as any;
+          if (idx === 0 && maxActiveDeltaIdx >= 0 && maxActiveDeltaIdx <= 2 && !dSectors?.[1]?.Segments && !dSectors?.[2]?.Segments) {
+            if (existingSectors[1]) {
+              existingSectors[1] = { ...existingSectors[1], Value: '', Segments: [] };
+            }
+            if (existingSectors[2]) {
+              existingSectors[2] = { ...existingSectors[2], Value: '', Segments: [] };
+            }
+            mergedSec.Value = deltaSec.Value ?? '';
+          } else if (idx === 1 && maxActiveDeltaIdx >= 0 && maxActiveDeltaIdx <= 2 && !dSectors?.[2]?.Segments) {
+            if (existingSectors[2]) {
+              existingSectors[2] = { ...existingSectors[2], Value: '', Segments: [] };
+            }
+            mergedSec.Value = deltaSec.Value ?? '';
+          } else if (idx === 2 && maxActiveDeltaIdx >= 0 && maxActiveDeltaIdx <= 2 && !deltaSec.Value) {
+            mergedSec.Value = '';
           }
 
           const deltaSegValues = Array.isArray(deltaSec.Segments)
@@ -888,9 +961,9 @@ export class F1LiveWebSocketService {
       const s2Status = this.resolveSectorStatus(s2, resolvedInPit);
       const s3Status = this.resolveSectorStatus(s3, resolvedInPit);
 
-      const s1Segments = this.resolveSegments(s1?.Segments, s1Status);
-      const s2Segments = this.resolveSegments(s2?.Segments, s2Status);
-      const s3Segments = this.resolveSegments(s3?.Segments, s3Status);
+      const s1Segments = this.resolveSegments(s1?.Segments, s1Status, 8, Boolean(s1Time));
+      const s2Segments = this.resolveSegments(s2?.Segments, s2Status, 8, Boolean(s2Time));
+      const s3Segments = this.resolveSegments(s3?.Segments, s3Status, 9, Boolean(s3Time));
 
       // Check latest microsector across all sectors
       const allActiveSegs = [...s1Segments, ...s2Segments, ...s3Segments].filter(s => s !== 'none');
@@ -1012,25 +1085,43 @@ export class F1LiveWebSocketService {
     return 'none';
   }
 
-  private resolveSegments(rawSegs: any, _fallback?: SectorStatus): SectorStatus[] {
+  private resolveSegments(rawSegs: any, fallback?: SectorStatus, targetCount = 8, isCompleted = false): SectorStatus[] {
     if (!rawSegs) {
-      return [];
+      if (isCompleted && fallback && fallback !== 'none') {
+        return Array(targetCount).fill(fallback);
+      }
+      return Array(targetCount).fill('none');
     }
     const segList: any[] = Array.isArray(rawSegs) ? rawSegs : Object.values(rawSegs);
     if (segList.length === 0) {
-      return [];
+      if (isCompleted && fallback && fallback !== 'none') {
+        return Array(targetCount).fill(fallback);
+      }
+      return Array(targetCount).fill('none');
     }
 
-    const mapped = segList.map(s => {
+    const mapped: SectorStatus[] = segList.map(s => {
       const code = s && typeof s === 'object' ? s.Status : s;
-      if (code === 2051) return 'purple' as SectorStatus;
-      if (code === 2049) return 'green' as SectorStatus;
-      if (code === 2048) return 'yellow' as SectorStatus;
-      if (code === 2064) return 'pit' as SectorStatus;
+      if (code === 2051 || s === 'purple') return 'purple' as SectorStatus;
+      if (code === 2049 || s === 'green') return 'green' as SectorStatus;
+      if (code === 2048 || s === 'yellow') return 'yellow' as SectorStatus;
+      if (code === 2064 || s === 'pit') return 'pit' as SectorStatus;
       return 'none' as SectorStatus;
     });
 
-    return mapped;
+    const result: SectorStatus[] = [];
+    const allActive = mapped.every(m => m !== 'none');
+    for (let i = 0; i < targetCount; i++) {
+      if (i < mapped.length) {
+        result.push(mapped[i]);
+      } else if (isCompleted && allActive && mapped.length > 0) {
+        result.push(mapped[mapped.length - 1]);
+      } else {
+        result.push('none');
+      }
+    }
+
+    return result;
   }
 
   private parseLapTimeToSeconds(timeStr?: string): number {

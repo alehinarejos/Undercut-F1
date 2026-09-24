@@ -41,15 +41,23 @@ function MiniSectorGroup({
   const totalTicks = count || 8;
 
   const ticks: string[] = [];
+  const hasCompletedTime = Boolean(lastTime && lastTime.trim() !== '' && !lastTime.includes('-'));
+  const allSegsActive = Boolean(segments && segments.length > 0 && segments.every(s => s && s !== 'none'));
+
   for (let i = 0; i < totalTicks; i++) {
-    if (segments && segments.length >= totalTicks && segments[i] && colorMap[segments[i]]) {
-      ticks.push(colorMap[segments[i]]);
-    } else if (segments && segments.length > 0 && segments.length < totalTicks) {
-      // If legacy 3-segment data in cache, expand across all 8 microsectors
-      const mappedIdx = Math.floor((i / totalTicks) * segments.length);
-      const segVal = segments[mappedIdx];
-      ticks.push((segVal && colorMap[segVal]) ? colorMap[segVal] : (colorMap[status] || colorMap.none));
-    } else if (status && status !== 'none') {
+    if (segments && segments.length > 0) {
+      if (i < segments.length) {
+        const segVal = segments[i];
+        ticks.push((segVal && colorMap[segVal]) ? colorMap[segVal] : colorMap.none);
+      } else if (hasCompletedTime && allSegsActive) {
+        // Only stretch if the entire sector has finished with legacy short segment array
+        const mappedIdx = Math.floor((i / totalTicks) * segments.length);
+        const segVal = segments[mappedIdx];
+        ticks.push((segVal && colorMap[segVal]) ? colorMap[segVal] : colorMap.none);
+      } else {
+        ticks.push(colorMap.none);
+      }
+    } else if (hasCompletedTime && status && status !== 'none') {
       ticks.push(colorMap[status] || colorMap.none);
     } else {
       ticks.push(colorMap.none);
@@ -215,11 +223,11 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
 
   // Local 1-second ticker so remaining session duration always counts down smoothly in the UI
   const [localRemainingSec, setLocalRemainingSec] = useState<number>(() =>
-    timeRemainingSec && timeRemainingSec > 0 ? Math.floor(timeRemainingSec) : 3000
+    timeRemainingSec !== undefined && timeRemainingSec >= 0 ? Math.floor(timeRemainingSec) : 0
   );
 
   React.useEffect(() => {
-    if (timeRemainingSec !== undefined && timeRemainingSec > 0) {
+    if (timeRemainingSec !== undefined && timeRemainingSec >= 0) {
       setLocalRemainingSec(Math.floor(timeRemainingSec));
     }
   }, [timeRemainingSec]);
@@ -227,7 +235,8 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
   React.useEffect(() => {
     const timer = window.setInterval(() => {
       setLocalRemainingSec((prev) => {
-        if (trackStatus === 'RED' || trackStatus === 'CHEQUERED') return prev;
+        if (trackStatus === 'CHEQUERED') return 0;
+        if (trackStatus === 'RED') return prev;
         return prev > 0 ? prev - 1 : 0;
       });
     }, 1000);
@@ -378,15 +387,36 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
               display: 'inline-flex',
               alignItems: 'center',
               gap: '6px',
-              background: trackStatus === 'RED' ? 'rgba(239, 68, 68, 0.18)' : 'rgba(0, 215, 182, 0.14)',
-              border: trackStatus === 'RED' ? '1px solid rgba(239, 68, 68, 0.45)' : '1px solid rgba(0, 215, 182, 0.4)',
+              background: (localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
+                ? 'rgba(255, 255, 255, 0.1)'
+                : trackStatus === 'RED'
+                ? 'rgba(239, 68, 68, 0.18)'
+                : 'rgba(0, 215, 182, 0.14)',
+              border: (localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
+                ? '1px solid rgba(255, 255, 255, 0.28)'
+                : trackStatus === 'RED'
+                ? '1px solid rgba(239, 68, 68, 0.45)'
+                : '1px solid rgba(0, 215, 182, 0.4)',
               padding: '2px 10px',
               borderRadius: '6px',
             }}
-            title="Duración restante de la sesión"
+            title="Duración de la sesión en tiempo real"
             >
-              <span style={{ fontSize: '0.62rem', fontWeight: 800, color: trackStatus === 'RED' ? '#ff4d4d' : '#00D7B6', letterSpacing: '0.5px' }}>
-                {trackStatus === 'RED' ? '⏸ DETENIDA' : '⏱ RESTANTE'}
+              <span style={{
+                fontSize: '0.62rem',
+                fontWeight: 800,
+                color: (localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
+                  ? '#e2e8f0'
+                  : trackStatus === 'RED'
+                  ? '#ff4d4d'
+                  : '#00D7B6',
+                letterSpacing: '0.5px',
+              }}>
+                {(localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
+                  ? '🏁 FINALIZADA'
+                  : trackStatus === 'RED'
+                  ? '⏸ DETENIDA'
+                  : '⏱ RESTANTE'}
               </span>
               <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 900, fontSize: '0.88rem', color: '#ffffff', letterSpacing: '0.03em' }}>
                 {formattedRemainingTime}

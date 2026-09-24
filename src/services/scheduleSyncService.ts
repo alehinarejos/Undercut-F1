@@ -10,8 +10,8 @@ export interface ScheduleSyncState {
   source: string;
 }
 
-const STORAGE_KEY_LAST_CHECK = 'f1_schedule_last_weekly_check_v4';
-const STORAGE_KEY_CUSTOM_SCHEDULE = 'f1_schedule_synced_2026_v4';
+const STORAGE_KEY_LAST_CHECK = 'f1_schedule_last_weekly_check_v5';
+const STORAGE_KEY_CUSTOM_SCHEDULE = 'f1_schedule_synced_2026_v5';
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 class ScheduleSyncService {
@@ -63,6 +63,7 @@ class ScheduleSyncService {
               completed: isFinished,
               winner: canonical?.winner || gp.winner,
               polePosition: canonical?.polePosition || gp.polePosition,
+              sessions: canonical?.sessions || gp.sessions,
             };
           });
         }
@@ -194,50 +195,61 @@ class ScheduleSyncService {
     }
   }
 
-  /**
-   * Update session time directly from live SignalR SessionInfo feed
-   */
-  public updateFromSignalRSessionInfo(sessionInfo: any): void {
-    if (!sessionInfo) return;
-    const sessionName = sessionInfo.Name || sessionInfo.Type;
-    const startDate = sessionInfo.StartDate; // e.g. "2026-09-24T13:00:00" (local track time)
-    const gmtOffset = sessionInfo.GmtOffset; // e.g. "04:00:00" or "-05:00:00"
-
-    if (!startDate || !sessionName) return;
-
-    let utcIso = startDate.endsWith('Z') ? startDate : `${startDate}Z`;
-    if (!startDate.endsWith('Z') && gmtOffset && typeof gmtOffset === 'string') {
+  private parseLocalWithGmtOffsetToUtcIso(dateStr?: string, gmtOffset?: string): string | undefined {
+    if (!dateStr || typeof dateStr !== 'string') return undefined;
+    let utcIso = dateStr.endsWith('Z') ? dateStr : `${dateStr}Z`;
+    if (!dateStr.endsWith('Z') && gmtOffset && typeof gmtOffset === 'string') {
       const cleanOffset = gmtOffset.trim();
-      // Format "+04:00" or "-05:00" from "04:00:00"
       const sign = cleanOffset.startsWith('-') ? '-' : '+';
       const parts = cleanOffset.replace(/^[+-]/, '').split(':');
       if (parts.length >= 2) {
-        const isoWithOffset = `${startDate}${sign}${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+        const isoWithOffset = `${dateStr}${sign}${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
         const parsed = new Date(isoWithOffset);
         if (!isNaN(parsed.getTime())) {
           utcIso = parsed.toISOString();
         }
       }
     }
+    return utcIso;
+  }
 
-    // Find next upcoming race
+  /**
+   * Update session time directly from live SignalR / WebSocket SessionInfo feed
+   */
+  public updateFromSignalRSessionInfo(sessionInfo: any): void {
+    if (!sessionInfo) return;
+    const sessionName = String(sessionInfo.Name || sessionInfo.Type || '');
+    const startDate = sessionInfo.StartDate;
+    const endDate = sessionInfo.EndDate;
+    const gmtOffset = sessionInfo.GmtOffset;
+
+    if (!startDate || !sessionName) return;
+
+    const startUtcIso = this.parseLocalWithGmtOffsetToUtcIso(startDate, gmtOffset);
+    const endUtcIso = this.parseLocalWithGmtOffsetToUtcIso(endDate, gmtOffset);
+    if (!startUtcIso) return;
+
     const upcomingGp = this.state.schedule.find(g => !g.completed);
     if (!upcomingGp) return;
 
     let updatedAny = false;
+    const lowerName = sessionName.toLowerCase();
     const updatedSessions = upcomingGp.sessions.map((sess) => {
-      const match = 
-        (sess.type === 'FP1' && (sessionName.toLowerCase().includes('practice 1') || sessionName.toLowerCase().includes('fp1'))) ||
-        (sess.type === 'FP2' && (sessionName.toLowerCase().includes('practice 2') || sessionName.toLowerCase().includes('fp2'))) ||
-        (sess.type === 'FP3' && (sessionName.toLowerCase().includes('practice 3') || sessionName.toLowerCase().includes('fp3'))) ||
-        (sess.type === 'Qualifying' && (sessionName.toLowerCase().includes('qualifying') || sessionName.toLowerCase().includes('qualy'))) ||
-        (sess.type === 'Race' && sessionName.toLowerCase().includes('race'));
+      const match =
+        (sess.type === 'FP1' && (lowerName.includes('practice 1') || lowerName.includes('fp1') || lowerName.includes('libres 1'))) ||
+        (sess.type === 'FP2' && (lowerName.includes('practice 2') || lowerName.includes('fp2') || lowerName.includes('libres 2'))) ||
+        (sess.type === 'FP3' && (lowerName.includes('practice 3') || lowerName.includes('fp3') || lowerName.includes('libres 3'))) ||
+        (sess.type === 'Qualifying' && (lowerName.includes('qualifying') || lowerName.includes('qualy'))) ||
+        (sess.type === 'Sprint' && lowerName === 'sprint') ||
+        (sess.type === 'Sprint Qualifying' && lowerName.includes('sprint')) ||
+        (sess.type === 'Race' && lowerName.includes('race'));
 
       if (match) {
         updatedAny = true;
         return {
           ...sess,
-          startTimeUtc: utcIso,
+          startTimeUtc: startUtcIso,
+          endTimeUtc: endUtcIso || sess.endTimeUtc,
           hasOfficialTime: true,
         };
       }
@@ -248,6 +260,49 @@ class ScheduleSyncService {
       upcomingGp.sessions = updatedSessions;
       this.state.source = 'F1 Oficial';
       this.state.statusMessage = `Horario oficial confirmado para ${sessionName}`;
+      this.notify();
+    }
+  }
+
+  /**
+   * Mark a session as dynamically completed when live timing reports Chequered / Finished / 00:00:00
+   */
+  public markSessionFinished(sessionNameOrType?: string, finishedUtc?: string): void {
+    const upcomingGp = this.state.schedule.find(g => !g.completed);
+    if (!upcomingGp) return;
+
+    const nowIso = finishedUtc || new Date().toISOString();
+    const nowMs = Date.now();
+    const lower = (sessionNameOrType || '').toLowerCase();
+    let updated = false;
+
+    upcomingGp.sessions = upcomingGp.sessions.map((sess) => {
+      const startMs = new Date(sess.startTimeUtc).getTime();
+      const matchByName =
+        lower &&
+        ((sess.type === 'FP1' && (lower.includes('practice 1') || lower.includes('fp1') || lower.includes('libres 1'))) ||
+          (sess.type === 'FP2' && (lower.includes('practice 2') || lower.includes('fp2') || lower.includes('libres 2'))) ||
+          (sess.type === 'FP3' && (lower.includes('practice 3') || lower.includes('fp3') || lower.includes('libres 3'))) ||
+          (sess.type === 'Qualifying' && (lower.includes('qualifying') || lower.includes('qualy'))) ||
+          (sess.type === 'Race' && lower.includes('race')));
+
+      // Or if no name specified, match any session whose start time has already passed or is within 45 min
+      const isCurrentlyActiveWindow = !isNaN(startMs) && nowMs >= startMs - 45 * 60 * 1000 && nowMs <= startMs + 150 * 60 * 1000;
+
+      if (matchByName || (!lower && isCurrentlyActiveWindow)) {
+        if (!sess.completed) {
+          updated = true;
+          return {
+            ...sess,
+            completed: true,
+            endTimeUtc: nowIso,
+          };
+        }
+      }
+      return sess;
+    });
+
+    if (updated) {
       this.notify();
     }
   }
@@ -344,13 +399,16 @@ export function getGrandPrixTimeline(gp: GrandPrixEvent): GrandPrixTimeline {
     let durationMs = 60 * 60 * 1000;
     if (sess.type === 'Race') durationMs = 120 * 60 * 1000;
     if (sess.type === 'Sprint') durationMs = 45 * 60 * 1000;
-    const endTime = !isNaN(startTime) ? startTime + durationMs : NaN;
+    const explicitEnd = sess.endTimeUtc ? new Date(sess.endTimeUtc).getTime() : NaN;
+    const endTime = !isNaN(explicitEnd) ? explicitEnd : (!isNaN(startTime) ? startTime + durationMs : NaN);
 
     let status: SessionStateKind = 'future';
-    if (!isNaN(startTime) && !isNaN(endTime)) {
-      if (now >= startTime && now <= endTime) {
+    if (sess.completed) {
+      status = 'completed';
+    } else if (!isNaN(startTime) && !isNaN(endTime)) {
+      if (now >= startTime && now < endTime) {
         status = 'live';
-      } else if (now > endTime) {
+      } else if (now >= endTime) {
         status = 'completed';
       } else {
         status = 'future';

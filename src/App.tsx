@@ -22,6 +22,7 @@ import { ScheduleView } from './components/ScheduleView';
 import { HomeDashboardView } from './components/HomeDashboardView';
 import { OfficialLeaderboardView } from './components/OfficialLeaderboardView';
 import { F1_SCHEDULE } from './data/schedule';
+import { scheduleSyncService, getNextUpcomingGrandPrix, getGrandPrixTimeline } from './services/scheduleSyncService';
 import { useLanguage } from './context/LanguageContext';
 import { 
   getRouteFromPathname, 
@@ -186,18 +187,30 @@ export const App: React.FC = () => {
     };
   }, [activeTab, leaderboard.length]);
 
-  // ===== REAL-TIME SESSION DETECTION FROM OFFICIAL SCHEDULE =====
-  // Returns the currently active session (if any) or null based on real UTC clock
+  // ===== REAL-TIME SESSION DETECTION FROM OFFICIAL SCHEDULE + LIVE TIMING =====
+  // Returns the currently active session (if any) or null based on real UTC clock and live stream status
   const getCurrentScheduledSession = () => {
+    const wsStatus = f1LiveWebSocketService.getSessionStatus();
+    if (wsStatus.isFinished || wsStatus.isChequered) {
+      return null;
+    }
+
     const now = new Date();
-    for (const gp of F1_SCHEDULE) {
+    const liveSchedule = scheduleSyncService.getState().schedule || F1_SCHEDULE;
+    for (const gp of liveSchedule) {
       for (const sess of gp.sessions) {
+        if (sess.completed) continue;
         const start = new Date(sess.startTimeUtc);
-        // Duration: FP = 60min, Qualy = 60min, Race = 120min, Sprint = 45min
         const durMin = sess.type === 'Race' ? 120 : sess.type === 'Sprint' ? 45 : 60;
-        const end = new Date(start.getTime() + durMin * 60 * 1000);
-        if (now >= start && now <= end) {
-          return { gp, sess, start, end, durSec: durMin * 60, remainingSec: Math.max(0, (end.getTime() - now.getTime()) / 1000) };
+        const end = sess.endTimeUtc
+          ? new Date(sess.endTimeUtc)
+          : new Date(start.getTime() + durMin * 60 * 1000);
+        if (now >= start && now < end) {
+          const scheduleRemainingSec = Math.max(0, (end.getTime() - now.getTime()) / 1000);
+          const remainingSec = (wsStatus.remainingSec !== undefined && wsStatus.remainingSec > 0)
+            ? wsStatus.remainingSec
+            : scheduleRemainingSec;
+          return { gp, sess, start, end, durSec: durMin * 60, remainingSec };
         }
       }
     }
@@ -230,12 +243,9 @@ export const App: React.FC = () => {
   // On mount: find the most recently completed session from the schedule and load its real data
   useEffect(() => {
     const loadLastSession = async () => {
-      // Fetch the actual session list from OpenF1 to get the latest completed session key
       try {
-        // Get the Madrid sessions (meeting 1294) — the current GP
         const madridSessions = await officialF1Api.getMeetingSessions(1294);
         if (madridSessions && madridSessions.length > 0) {
-          // Find the most recently completed session
           const nowMs = Date.now();
           let latestCompletedKey: number | null = null;
           for (const s of madridSessions) {
@@ -256,13 +266,13 @@ export const App: React.FC = () => {
     loadLastSession();
   }, [engine]);
 
-  // Poll every 15 seconds to detect session changes from the schedule
+  // Poll every 5 seconds to detect session changes from the schedule and live stream
   useEffect(() => {
     const detectSession = () => {
       const active = getCurrentScheduledSession();
       const wsStatus = f1LiveWebSocketService.getSessionStatus();
       const isWsLive = wsStatus.sessionStatus === 'Started' && !wsStatus.isFinished && !wsStatus.isChequered;
-      const isSignalRLive = f1SignalR.getStatus() === 'live_streaming';
+      const isSignalRLive = f1SignalR.getStatus() === 'live_streaming' && !wsStatus.isFinished && !wsStatus.isChequered;
 
       if (active) {
         const key = `${active.gp.circuitId}-${active.sess.type}-${active.sess.startTimeUtc}`;
@@ -276,49 +286,74 @@ export const App: React.FC = () => {
           activeSessionKeyRef.current = key;
           engine.setCircuit(active.gp.circuitId);
 
-          // Reset engine for the new session
           engine.resetForNewSession(
             `${active.gp.name} - ${active.sess.name}`,
             engineType,
             active.remainingSec
           );
 
-          // Reset loadedSessionKey so we load fresh data when this session ends
           loadedSessionKeyRef.current = null;
-
           console.info(`[SessionManager] New session detected: ${active.sess.name} at ${active.gp.name}. Remaining: ${Math.round(active.remainingSec)}s`);
         } else {
-          // Keep remaining duration synced with schedule unless WebSocket clock is actively providing it
-          if (!wsStatus.remainingSec || wsStatus.remainingSec <= 0) {
-            engine.updateLiveSessionState({
-              name: `${active.gp.name} - ${active.sess.name}`,
-              type: engineType,
-              timeRemainingSec: active.remainingSec,
-              totalLaps: (engineType === 'RACE' || engineType === 'SPRINT') ? undefined : 0,
-            });
-          }
+          engine.updateLiveSessionState({
+            name: `${active.gp.name} - ${active.sess.name}`,
+            type: engineType,
+            timeRemainingSec: active.remainingSec,
+            totalLaps: (engineType === 'RACE' || engineType === 'SPRINT') ? undefined : 0,
+          });
         }
         setIsOfficialLive(true);
         engine.setSessionEnded(false);
       } else if (isWsLive || isSignalRLive) {
-        // Official WebSocket or SignalR is actively streaming a session
         setIsOfficialLive(true);
         engine.setSessionEnded(false);
+        if (wsStatus.remainingSec !== undefined && wsStatus.remainingSec > 0) {
+          engine.updateLiveSessionState({
+            timeRemainingSec: wsStatus.remainingSec,
+          });
+        }
       } else {
-        // No official session live right now
+        // No official session live right now — check if a session finished recently (< 90 min ago)
+        const upcomingGp = getNextUpcomingGrandPrix(scheduleSyncService.getState().schedule);
+        const timeline = getGrandPrixTimeline(upcomingGp);
+        const lastComp = timeline.lastCompletedSession;
+        const nowMs = Date.now();
+        const isRecentlyFinished =
+          wsStatus.isFinished ||
+          wsStatus.isChequered ||
+          (lastComp != null && !isNaN(lastComp.endTime) && (nowMs - lastComp.endTime) >= 0 && (nowMs - lastComp.endTime) < 90 * 60 * 1000);
+
         if (activeSessionKeyRef.current !== null) {
           activeSessionKeyRef.current = null;
           engine.setSessionEnded(true);
         }
         setIsOfficialLive(false);
-        if (!engine.isEngineRunning()) {
+
+        if (isRecentlyFinished) {
+          const finishedAt = lastComp?.endTime || nowMs;
+          const sessName = lastComp ? `${upcomingGp.name} - ${lastComp.session.name}` : undefined;
+          engine.setSessionEnded(true);
+          engine.updateLiveSessionState({
+            name: sessName,
+            timeRemainingSec: 0,
+            trackStatus: 'CHEQUERED',
+            finishedAtMs: finishedAt,
+          });
+          setSession(prev => ({
+            ...prev,
+            name: sessName || prev.name,
+            timeRemainingSec: 0,
+            trackStatus: 'CHEQUERED',
+            finishedAtMs: finishedAt,
+          }));
+        } else if (!engine.isEngineRunning()) {
           engine.start();
         }
       }
     };
 
     detectSession(); // run immediately on mount
-    const interval = setInterval(detectSession, 15000); // then every 15s
+    const interval = setInterval(detectSession, 5000); // then every 5s
     return () => clearInterval(interval);
   }, [engine]);
 
@@ -525,6 +560,12 @@ export const App: React.FC = () => {
         const now = Date.now();
         const finishedAtMs = (parsedFinishedTime && !isNaN(parsedFinishedTime)) ? parsedFinishedTime : now;
         const isRecent = (now - finishedAtMs) < 90 * 60 * 1000;
+
+        engine.updateLiveSessionState({
+          trackStatus: isRecent ? 'CHEQUERED' : 'GREEN',
+          timeRemainingSec: 0,
+          finishedAtMs: isRecent ? finishedAtMs : undefined,
+        });
 
         setSession(prev => {
           if (isRecent) {
