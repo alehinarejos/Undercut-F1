@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import type { LeaderboardEntry } from '../types/telemetry';
 import { TeamLogo } from './TeamLogo';
 
@@ -166,7 +166,7 @@ interface LeaderboardProps {
 }
 
 export const Leaderboard: React.FC<LeaderboardProps> = ({
-  entries,
+  entries: rawEntries,
   selectedDriverId,
   onSelectDriver,
   isQualifying = false,
@@ -176,6 +176,41 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
   totalLaps = 0,
   trackStatus = 'GREEN',
 }) => {
+  const entries = useMemo(() => {
+    if (!Array.isArray(rawEntries)) return [];
+    const hasHadjar = rawEntries.some(e => e?.driver && (e.driver.code === 'HAD' || e.driver.number === 6));
+    const result: LeaderboardEntry[] = [];
+    for (const e of rawEntries) {
+      if (!e || !e.driver) continue;
+      const isTsu =
+        e.driver.code === 'TSU' ||
+        e.driver.id === 'tsu' ||
+        e.driver.number === 22 ||
+        (e.driver.lastName && e.driver.lastName.toLowerCase().includes('tsunoda'));
+      if (isTsu) {
+        if (!hasHadjar) {
+          result.push({
+            ...e,
+            driver: {
+              id: 'had',
+              code: 'HAD',
+              number: 6,
+              firstName: 'Isack',
+              lastName: 'Hadjar',
+              team: 'Red Bull Racing',
+              teamColor: '#3671C6',
+              country: 'Francia',
+              flag: '🇫🇷',
+            },
+          });
+        }
+        continue;
+      }
+      result.push(e);
+    }
+    return result.map((e, idx) => ({ ...e, position: idx + 1 }));
+  }, [rawEntries]);
+
   const [viewMode, setViewMode] = useState<'timing' | 'stints'>('timing');
 
   // Local 1-second ticker so remaining session duration always counts down smoothly in the UI

@@ -839,12 +839,16 @@ export class F1LiveWebSocketService {
     const entries: LeaderboardEntry[] = [];
 
     // Map cached entries
+    const hasHadjarLine = this.cachedTimingLines.has('6');
     for (const [numStr, line] of this.cachedTimingLines.entries()) {
       const driverMeta = this.cachedDrivers.get(numStr);
       const stints = this.cachedStints.get(numStr) || [];
       const currentStint = stints[stints.length - 1];
 
       const driverNum = parseInt(numStr, 10);
+      if (driverNum === 22 || driverMeta?.Tla === 'TSU') {
+        if (hasHadjarLine) continue;
+      }
       const driver = this.resolveDriver(driverNum, driverMeta);
 
       const pos = parseInt(line.Position || '99', 10);
@@ -965,6 +969,10 @@ export class F1LiveWebSocketService {
   }
 
   private resolveDriver(num: number, raw?: RawF1DriverItem): any {
+    if (num === 22 || raw?.Tla === 'TSU') {
+      const had = DRIVERS.find(d => d.code === 'HAD');
+      if (had) return { ...had };
+    }
     const matched = DRIVERS.find(d => d.number === num || (raw?.Tla && d.code === raw.Tla));
     if (matched) {
       return {
@@ -1044,16 +1052,48 @@ export class F1LiveWebSocketService {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const inPitCount = parsed.filter((e: any) => e && e.inPit).length;
+          const hasHadjar = parsed.some((e: any) => e?.driver && (e.driver.code === 'HAD' || e.driver.number === 6));
+          const hadjarDriver = DRIVERS.find(d => d.code === 'HAD') || {
+            id: 'had',
+            code: 'HAD',
+            number: 6,
+            firstName: 'Isack',
+            lastName: 'Hadjar',
+            team: 'Red Bull Racing',
+            teamColor: '#3671C6',
+            country: 'Francia',
+            flag: '🇫🇷',
+          };
+          let modified = false;
+          const cleaned: LeaderboardEntry[] = [];
+          for (const e of parsed) {
+            if (!e || !e.driver) continue;
+            const isTsu = e.driver.code === 'TSU' || e.driver.id === 'tsu' || e.driver.number === 22 ||
+              (e.driver.lastName && String(e.driver.lastName).toLowerCase().includes('tsunoda'));
+            if (isTsu) {
+              modified = true;
+              if (!hasHadjar) {
+                cleaned.push({ ...e, driver: { ...hadjarDriver } });
+              }
+              continue;
+            }
+            cleaned.push(e);
+          }
+          const inPitCount = cleaned.filter((e: any) => e && e.inPit).length;
           if (inPitCount > 8) {
-            parsed.forEach((e: any, idx: number) => {
+            modified = true;
+            cleaned.forEach((e: any, idx: number) => {
               if (e) {
                 e.inPit = idx >= 18;
                 e.isPitOut = false;
               }
             });
           }
-          return parsed;
+          if (modified) {
+            cleaned.forEach((e, idx) => { e.position = idx + 1; });
+            this.saveToStorage(cleaned);
+          }
+          return cleaned;
         }
       }
     } catch (e) {

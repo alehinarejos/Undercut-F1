@@ -242,7 +242,7 @@ export class TelemetryEngine {
       93.400, // LEC P10 (1:33.400)
       93.580, // LIN P11
       93.650, // COL P12
-      93.720, // TSU P13
+      93.720, // HAD P13
       93.810, // BOR P14
       93.900, // HUL P15
       94.020, // LAW P16
@@ -273,7 +273,7 @@ export class TelemetryEngine {
       0.80, // LEC - Return tunnel braking zone
       0.68, // LIN - Valdebebas back straight
       0.56, // COL - Exiting La Monumental
-      0.44, // TSU - Midway through La Monumental
+      0.44, // HAD - Midway through La Monumental
       0.32, // BOR - Turn 7 chicane
       0.20, // HUL - Tunnel entry
       0.10, // LAW - Turn 1-2 chicane
@@ -295,7 +295,7 @@ export class TelemetryEngine {
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            savedLiveEntries = parsed;
+            savedLiveEntries = this.sanitizeDriverRosterInEntries(parsed);
           }
         }
       } catch (e) {
@@ -313,7 +313,7 @@ export class TelemetryEngine {
           '27': { compound: 'MEDIUM', age: 5 },
           '87': { compound: 'SOFT', age: 2 },
           '31': { compound: 'SOFT', age: 2 },
-          '22': { compound: 'SOFT', age: 2 },
+          '6':  { compound: 'SOFT', age: 2 },
           '5':  { compound: 'MEDIUM', age: 6 },
           '30': { compound: 'HARD', age: 3 },
           '14': { compound: 'SOFT', age: 5 },
@@ -595,7 +595,7 @@ export class TelemetryEngine {
       82.010, // GAS P7 (1:22.010)
       82.180, // LIN P8 (1:22.180)
       82.250, // COL P9 (1:22.250)
-      82.310, // TSU P10 (1:22.310)
+      82.310, // HAD P10 (1:22.310)
       82.450, // BOR P11
       82.520, // HUL P12
       82.610, // SAI P13
@@ -647,7 +647,7 @@ export class TelemetryEngine {
         2.696,  // P7 GAS (+27.351s)
         17.785, // P8 LIN (+45.136s)
         2.217,  // P9 COL (+47.353s)
-        10.834, // P10 TSU (+58.187s)
+        10.834, // P10 HAD (+58.187s)
         7.000,  // P11 BOR (+65.187s)
         1.000,  // P12 HUL (+66.187s)
         7.930,  // P13 SAI (+74.117s)
@@ -766,9 +766,80 @@ export class TelemetryEngine {
   }
 
   /**
+   * Sanitize any leaderboard entries array so Yuki Tsunoda (TSU #22) is replaced by Isack Hadjar (HAD #6)
+   * or removed if HAD is already present, updating localStorage if legacy entries were found.
+   */
+  public sanitizeDriverRosterInEntries(entries: LeaderboardEntry[]): LeaderboardEntry[] {
+    if (!Array.isArray(entries) || entries.length === 0) return entries;
+    const hasHadjar = entries.some(e => e?.driver && (e.driver.code === 'HAD' || e.driver.number === 6));
+    let modified = false;
+    const hadjarDriver = DRIVERS.find(d => d.code === 'HAD') || {
+      id: 'had',
+      code: 'HAD',
+      number: 6,
+      firstName: 'Isack',
+      lastName: 'Hadjar',
+      team: 'Red Bull Racing',
+      teamColor: '#3671C6',
+      country: 'Francia',
+      flag: '🇫🇷',
+    };
+
+    const cleaned: LeaderboardEntry[] = [];
+    for (const entry of entries) {
+      if (!entry || !entry.driver) continue;
+      const isTsu =
+        entry.driver.code === 'TSU' ||
+        entry.driver.id === 'tsu' ||
+        entry.driver.number === 22 ||
+        (entry.driver.lastName && entry.driver.lastName.toLowerCase().includes('tsunoda'));
+
+      if (isTsu) {
+        modified = true;
+        if (!hasHadjar) {
+          cleaned.push({
+            ...entry,
+            driver: { ...hadjarDriver },
+          });
+        }
+        continue;
+      }
+
+      if (entry.driver.code === 'LAW' && entry.driver.team === 'Red Bull Racing') {
+        modified = true;
+        cleaned.push({
+          ...entry,
+          driver: {
+            ...entry.driver,
+            team: 'Visa Cash App RB',
+            teamColor: '#6692FF',
+          },
+        });
+        continue;
+      }
+
+      cleaned.push(entry);
+    }
+
+    if (modified) {
+      cleaned.forEach((e, idx) => {
+        e.position = idx + 1;
+      });
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('f1_live_leaderboard', JSON.stringify(cleaned));
+          localStorage.setItem('f1_saved_leaderboard_madrid', JSON.stringify(cleaned));
+        } catch {}
+      }
+    }
+    return cleaned;
+  }
+
+  /**
    * Emit the current engine state to all listeners
    */
   public emitCurrentState() {
+    this.leaderboard = this.sanitizeDriverRosterInEntries(this.leaderboard);
     const pitPrediction = this.calculatePitPrediction(this.selectedDriverId);
     this.listeners.onTick?.({
       leaderboard: [...this.leaderboard],
@@ -846,16 +917,17 @@ export class TelemetryEngine {
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.bestLapTime && parsed[0].bestLapTime !== '--:--.---') {
-            const inPitCount = parsed.filter((e: any) => e && e.inPit).length;
+            const sanitized = this.sanitizeDriverRosterInEntries(parsed);
+            const inPitCount = sanitized.filter((e: any) => e && e.inPit).length;
             if (inPitCount > 8) {
-              parsed.forEach((e: any, idx: number) => {
+              sanitized.forEach((e: any, idx: number) => {
                 if (e) {
                   e.inPit = idx >= 18;
                   e.isPitOut = idx === 17;
                 }
               });
             }
-            this.leaderboard = parsed;
+            this.leaderboard = sanitized;
             hasSavedData = true;
           }
         }

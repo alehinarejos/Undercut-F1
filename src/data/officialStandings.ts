@@ -68,7 +68,6 @@ export const DRIVER_FLAGS: Record<string, string> = {
   ALB: '🇹🇭',
   OCO: '🇫🇷',
   ALO: '🇪🇸',
-  TSU: '🇯🇵',
   STR: '🇨🇦',
   BOT: '🇫🇮',
   PER: '🇲🇽',
@@ -110,7 +109,7 @@ export const OFFICIAL_DRIVER_STANDINGS: DriverStanding[] = [
   { position: 5, driverId: 'lec', code: 'LEC', number: 16, name: 'Charles Leclerc', team: 'Ferrari', teamColor: '#ED1131', points: 155, wins: 1, podiums: 6, flag: '🇲🇨' },
   { position: 6, driverId: 'ver', code: 'VER', number: 3, name: 'Max Verstappen', team: 'Red Bull Racing', teamColor: '#4781D7', points: 127, wins: 0, podiums: 5, flag: '🇳🇱' },
   { position: 7, driverId: 'pia', code: 'PIA', number: 81, name: 'Oscar Piastri', team: 'McLaren', teamColor: '#F47600', points: 116, wins: 0, podiums: 4, flag: '🇦🇺' },
-  { position: 8, driverId: 'had', code: 'HAD', number: 6, name: 'Isack Hadjar', team: 'Red Bull Racing', teamColor: '#4781D7', points: 71, wins: 0, podiums: 0, flag: '🇫🇷' },
+  { position: 8, driverId: 'had', code: 'HAD', number: 6, name: 'Isack Hadjar', team: 'Red Bull Racing', teamColor: '#4781D7', points: 72, wins: 0, podiums: 0, flag: '🇫🇷' },
   { position: 9, driverId: 'law', code: 'LAW', number: 30, name: 'Liam Lawson', team: 'Racing Bulls', teamColor: '#6C98FF', points: 51, wins: 0, podiums: 0, flag: '🇳🇿' },
   { position: 10, driverId: 'gas', code: 'GAS', number: 10, name: 'Pierre Gasly', team: 'Alpine', teamColor: '#00A1E8', points: 41, wins: 0, podiums: 1, flag: '🇫🇷' },
   { position: 11, driverId: 'lin', code: 'LIN', number: 41, name: 'Arvid Lindblad', team: 'Racing Bulls', teamColor: '#6C98FF', points: 29, wins: 0, podiums: 0, flag: '🇬🇧' },
@@ -122,10 +121,9 @@ export const OFFICIAL_DRIVER_STANDINGS: DriverStanding[] = [
   { position: 17, driverId: 'alb', code: 'ALB', number: 23, name: 'Alexander Albon', team: 'Williams', teamColor: '#1868DB', points: 5, wins: 0, podiums: 0, flag: '🇹🇭' },
   { position: 18, driverId: 'oco', code: 'OCO', number: 31, name: 'Esteban Ocon', team: 'Haas F1 Team', teamColor: '#9C9FA2', points: 3, wins: 0, podiums: 0, flag: '🇫🇷' },
   { position: 19, driverId: 'alo', code: 'ALO', number: 14, name: 'Fernando Alonso', team: 'Aston Martin', teamColor: '#229971', points: 3, wins: 0, podiums: 0, flag: '🇪🇸' },
-  { position: 20, driverId: 'tsu', code: 'TSU', number: 22, name: 'Yuki Tsunoda', team: 'Racing Bulls', teamColor: '#6C98FF', points: 1, wins: 0, podiums: 0, flag: '🇯🇵' },
-  { position: 21, driverId: 'str', code: 'STR', number: 18, name: 'Lance Stroll', team: 'Aston Martin', teamColor: '#229971', points: 0, wins: 0, podiums: 0, flag: '🇨🇦' },
-  { position: 22, driverId: 'bot', code: 'BOT', number: 77, name: 'Valtteri Bottas', team: 'Cadillac', teamColor: '#B5A065', points: 0, wins: 0, podiums: 0, flag: '🇫🇮' },
-  { position: 23, driverId: 'per', code: 'PER', number: 11, name: 'Sergio Pérez', team: 'Cadillac', teamColor: '#B5A065', points: 0, wins: 0, podiums: 0, flag: '🇲🇽' },
+  { position: 20, driverId: 'str', code: 'STR', number: 18, name: 'Lance Stroll', team: 'Aston Martin', teamColor: '#229971', points: 0, wins: 0, podiums: 0, flag: '🇨🇦' },
+  { position: 21, driverId: 'bot', code: 'BOT', number: 77, name: 'Valtteri Bottas', team: 'Cadillac', teamColor: '#B5A065', points: 0, wins: 0, podiums: 0, flag: '🇫🇮' },
+  { position: 22, driverId: 'per', code: 'PER', number: 11, name: 'Sergio Pérez', team: 'Cadillac', teamColor: '#B5A065', points: 0, wins: 0, podiums: 0, flag: '🇲🇽' },
 ];
 
 // Official 2026 Season World Constructors' Championship Standings (Post-Monza R15, 100% Real 2026 Season)
