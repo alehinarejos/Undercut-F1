@@ -247,36 +247,61 @@ export const App: React.FC = () => {
           active.sess.type === 'Sprint' ? 'SPRINT' :
           (active.sess.type === 'Qualifying' || active.sess.type === 'Sprint Qualifying') ? 'QUALIFYING' : 'PRACTICE';
 
+        const liveRemainingSec = Math.max(0, Math.round(active.remainingSec));
+
         if (isNewSession) {
           activeSessionKeyRef.current = key;
           engine.setCircuit(active.gp.circuitId);
 
-          // Reset WebSocket & Engine session caches so previous session times are wiped
+          // Sync WebSocket & Engine session caches (preserving active WS TimingData if already streaming this session)
           f1LiveWebSocketService.resetForNewSession(
             key,
             `${active.gp.name} - ${active.sess.name}`,
             active.sess.type,
-            active.remainingSec
+            liveRemainingSec
           );
 
           engine.resetForNewSession(
             `${active.gp.name} - ${active.sess.name}`,
             engineType,
-            active.remainingSec,
+            liveRemainingSec,
             key
           );
 
+          const wsLiveEntries = f1LiveWebSocketService.getInitialLeaderboard();
+          if (wsLiveEntries && wsLiveEntries.length > 0) {
+            engine.ingestOfficialLiveEntries(wsLiveEntries);
+          } else {
+            f1LiveWebSocketService.requestFullState();
+          }
+
+          loadedSessionKeyRef.current = null;
+          officialF1Api.checkLiveStatus().then(latest => {
+            const targetSession = latest.activeSession || latest.latestCompletedSession;
+            if (targetSession?.session_key) {
+              loadRealSessionData(targetSession.session_key, targetSession.meeting_key);
+            }
+          }).catch(() => {});
+
           setLeaderboard(engine.getLeaderboard());
           setSession(engine.getSession());
-          loadedSessionKeyRef.current = null;
-          console.info(`[SessionManager] New session detected: ${active.sess.name} at ${active.gp.name}. Remaining: ${Math.round(active.remainingSec)}s`);
+          console.info(`[SessionManager] New session detected: ${active.sess.name} at ${active.gp.name}. Remaining: ${liveRemainingSec}s`);
         } else {
           engine.updateLiveSessionState({
             name: `${active.gp.name} - ${active.sess.name}`,
             type: engineType,
-            timeRemainingSec: active.remainingSec,
+            timeRemainingSec: liveRemainingSec,
             totalLaps: (engineType === 'RACE' || engineType === 'SPRINT') ? undefined : 0,
           });
+          setSession(prev => ({
+            ...prev,
+            name: `${active.gp.name} - ${active.sess.name}`,
+            type: engineType,
+            timeRemainingSec: liveRemainingSec,
+            trackStatus: prev.trackStatus === 'CHEQUERED' ? 'GREEN' : prev.trackStatus,
+            totalLaps: (engineType === 'RACE' || engineType === 'SPRINT') ? prev.totalLaps : 0,
+            finishedAtMs: undefined,
+          }));
         }
         setIsOfficialLive(true);
         engine.setSessionEnded(false);
@@ -284,9 +309,15 @@ export const App: React.FC = () => {
         setIsOfficialLive(true);
         engine.setSessionEnded(false);
         if (wsStatus.remainingSec !== undefined && wsStatus.remainingSec > 0) {
+          const rem = Math.max(0, Math.round(wsStatus.remainingSec));
           engine.updateLiveSessionState({
-            timeRemainingSec: wsStatus.remainingSec,
+            timeRemainingSec: rem,
           });
+          setSession(prev => ({
+            ...prev,
+            timeRemainingSec: rem,
+            trackStatus: prev.trackStatus === 'CHEQUERED' ? 'GREEN' : prev.trackStatus,
+          }));
         }
       } else {
         // No official session live right now — check if a session finished recently (< 90 min ago)
@@ -329,7 +360,7 @@ export const App: React.FC = () => {
     };
 
     detectSession(); // run immediately on mount
-    const interval = setInterval(detectSession, 5000); // then every 5s
+    const interval = setInterval(detectSession, 1000); // tick every 1s for real-time countdown & live session sync
     return () => clearInterval(interval);
   }, [engine]);
 

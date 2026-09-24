@@ -296,7 +296,7 @@ export class TelemetryEngine {
           const prevRaw = localStorage.getItem('f1_official_latest_session_v4');
           if (prevRaw) {
             const prevParsed = JSON.parse(prevRaw);
-            if (Array.isArray(prevParsed) && prevParsed[0]?.bestLapTime) {
+            if (Array.isArray(prevParsed) && !this.isSyntheticLeaderboard(prevParsed) && prevParsed[0]?.bestLapTime) {
               const prevBestSec = this.parseLapTimeToSeconds(prevParsed[0].bestLapTime);
               if (prevBestSec >= 98 && prevBestSec < 200) {
                 const wkKey = `f1_weekend_fastest_v2_${activeCircuitId}`;
@@ -313,14 +313,17 @@ export class TelemetryEngine {
           localStorage.setItem('f1_active_session_key_v4', currentSessionKey);
           this.driverLiveSectors.clear();
         } else {
-          const rawSectors = localStorage.getItem('f1_session_best_sectors_v4');
-          if (rawSectors) {
-            savedBestSectors = JSON.parse(rawSectors) || {};
-          }
           const raw = localStorage.getItem('f1_official_latest_session_v4');
           if (raw) {
             const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed) && parsed.length > 0) {
+            if (this.isSyntheticLeaderboard(parsed)) {
+              localStorage.removeItem('f1_official_latest_session_v4');
+              localStorage.removeItem('f1_session_best_sectors_v4');
+            } else if (Array.isArray(parsed) && parsed.length > 0) {
+              const rawSectors = localStorage.getItem('f1_session_best_sectors_v4');
+              if (rawSectors) {
+                savedBestSectors = JSON.parse(rawSectors) || {};
+              }
               const cleaned = this.sanitizeDriverRosterInEntries(parsed);
               const leaderSec = this.parseLapTimeToSeconds(cleaned[0]?.bestLapTime);
               if (activeCircuit.id !== 'baku' || leaderSec >= 98) {
@@ -953,17 +956,18 @@ export class TelemetryEngine {
     this.session.redFlagDeployed = false;
 
     let hasSameSessionSavedData = false;
+    let isSameSession = false;
     if (typeof window !== 'undefined') {
       try {
         const storedKey = localStorage.getItem('f1_active_session_key_v4');
-        const isSameSession = storedKey === resolvedKey;
+        isSameSession = storedKey === resolvedKey;
 
         if (!isSameSession) {
           // Archive previous session's best lap into Weekend Fastest Lap before clearing
           const prevRaw = localStorage.getItem('f1_official_latest_session_v4');
           if (prevRaw) {
             const prevParsed = JSON.parse(prevRaw);
-            if (Array.isArray(prevParsed) && prevParsed[0]?.bestLapTime) {
+            if (Array.isArray(prevParsed) && !this.isSyntheticLeaderboard(prevParsed) && prevParsed[0]?.bestLapTime) {
               const prevBestSec = this.parseLapTimeToSeconds(prevParsed[0].bestLapTime);
               if (prevBestSec >= 65 && prevBestSec < 200) {
                 const wkKey = `f1_weekend_fastest_v2_${this.circuit.id}`;
@@ -980,11 +984,15 @@ export class TelemetryEngine {
           localStorage.removeItem('f1_official_latest_session_v4');
           localStorage.removeItem('f1_session_best_sectors_v4');
           localStorage.setItem('f1_active_session_key_v4', resolvedKey);
+          this.hasLiveOfficialData = false;
         } else {
           const raw = localStorage.getItem('f1_official_latest_session_v4');
           if (raw) {
             const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.bestLapTime && parsed[0].bestLapTime !== '--:--.---') {
+            if (this.isSyntheticLeaderboard(parsed)) {
+              localStorage.removeItem('f1_official_latest_session_v4');
+              localStorage.removeItem('f1_session_best_sectors_v4');
+            } else if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.bestLapTime && parsed[0].bestLapTime !== '--:--.---') {
               const sanitized = this.sanitizeDriverRosterInEntries(parsed);
               const inPitCount = sanitized.filter((e: any) => e && e.inPit).length;
               if (inPitCount > 8) {
@@ -1003,16 +1011,14 @@ export class TelemetryEngine {
       } catch {}
     }
 
-    if (!hasSameSessionSavedData) {
-      // Clear previous session live sector state and initialize fresh session times
+    if (!hasSameSessionSavedData && !(isSameSession && this.hasLiveOfficialData)) {
+      // Clear previous session live sector state and initialize fresh session times while waiting for live WS / OpenF1
       this.driverLiveSectors.clear();
       const isPractice2 = /fp2|practice 2|libres 2/i.test(sessionName);
       const offset = isPractice2 ? -0.160 : 0;
       this.sessionBestS1 = isPractice2 ? 35.790 : 35.840;
       this.sessionBestS2 = isPractice2 ? 41.045 : 41.085;
       this.sessionBestS3 = isPractice2 ? 25.345 : 25.380;
-
-      const newSessionBestSectors: Record<string, { s1?: string; s2?: string; s3?: string; bestLap?: string }> = {};
 
       this.leaderboard.forEach((entry, idx) => {
         const baseSec = Number((102.340 + offset + idx * 0.115).toFixed(3));
@@ -1048,25 +1054,19 @@ export class TelemetryEngine {
         entry.tyre.age = 2;
         entry.lapsCompleted = 2;
         entry.trackProgress = (idx * 0.045) % 1.0;
-
-        newSessionBestSectors[String(entry.driver.number)] = {
-          s1,
-          s2,
-          s3,
-          bestLap: formattedLap,
-        };
       });
-
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('f1_session_best_sectors_v4', JSON.stringify(newSessionBestSectors));
-          localStorage.setItem('f1_official_latest_session_v4', JSON.stringify(this.leaderboard));
-        } catch {}
-      }
     }
 
     this.start();
     this.emitCurrentState();
+  }
+
+  private isSyntheticLeaderboard(entries: any[]): boolean {
+    if (!Array.isArray(entries) || entries.length < 3) return false;
+    const firstLap = entries[0]?.bestLapTime;
+    if (firstLap === '1:42.180' || firstLap === '1:42.340') return true;
+    if (entries[1]?.gapToAhead === '+0.115s' && entries[2]?.gapToAhead === '+0.115s') return true;
+    return false;
   }
 
   /**

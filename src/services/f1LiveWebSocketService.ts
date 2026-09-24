@@ -147,6 +147,31 @@ export class F1LiveWebSocketService {
     this.currentLeaderboard = this.loadFromStorage();
   }
 
+  private normalizeSessionToken(str?: string | null): string {
+    if (!str) return '';
+    const lower = str.toLowerCase();
+    if (/fp1|practice 1|libres 1/.test(lower)) return 'fp1';
+    if (/fp2|practice 2|libres 2/.test(lower)) return 'fp2';
+    if (/fp3|practice 3|libres 3/.test(lower)) return 'fp3';
+    if (/sprint qual|shootout/.test(lower)) return 'sprint_qualy';
+    if (/sprint/.test(lower)) return 'sprint';
+    if (/qual|qualy|clasificaci/.test(lower)) return 'qualy';
+    if (/race|carrera/.test(lower)) return 'race';
+    return lower.trim();
+  }
+
+  public requestFullState(): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      try {
+        this.ws.send(encode({ type: 'get:state' }));
+      } catch (e) {
+        console.warn('[F1LiveWS] Failed to send get:state:', e);
+      }
+    } else {
+      this.startConnection();
+    }
+  }
+
   public resetForNewSession(
     sessionKey: string,
     sessionName?: string,
@@ -154,9 +179,19 @@ export class F1LiveWebSocketService {
     remainingSec?: number
   ): void {
     const storedKey = typeof window !== 'undefined' ? localStorage.getItem(STORAGE_ACTIVE_SESSION_KEY) : this.activeSessionKey;
-    const isDifferentSession = sessionKey && (this.activeSessionKey !== sessionKey || storedKey !== sessionKey);
+    const incomingToken = this.normalizeSessionToken(sessionName || sessionType || sessionKey);
+    const currentToken = this.normalizeSessionToken(
+      this.currentSessionStatus.sessionName || this.activeSessionKey || storedKey
+    );
+    const isDifferentSession = Boolean(incomingToken && currentToken && incomingToken !== currentToken);
 
     this.activeSessionKey = sessionKey;
+    if (typeof window !== 'undefined' && sessionKey) {
+      try {
+        localStorage.setItem(STORAGE_ACTIVE_SESSION_KEY, sessionKey);
+      } catch {}
+    }
+
     if (isDifferentSession) {
       this.cachedTimingLines.clear();
       this.cachedBestSectors.clear();
@@ -166,24 +201,44 @@ export class F1LiveWebSocketService {
         try {
           localStorage.removeItem(STORAGE_LIVE_LEADERBOARD_KEY);
           localStorage.removeItem(STORAGE_SESSION_BEST_SECTORS_KEY);
-          localStorage.setItem(STORAGE_ACTIVE_SESSION_KEY, sessionKey);
         } catch {}
       }
+      this.requestFullState();
+    } else if (this.cachedTimingLines.size === 0) {
+      this.requestFullState();
     }
 
-    this.clockBaseRemainingSec = remainingSec !== undefined ? remainingSec : null;
-    this.clockBaseUtcMs = Date.now();
+    const hasValidLiveClock =
+      !isDifferentSession &&
+      this.clockBaseRemainingSec !== null &&
+      this.clockBaseRemainingSec > 0 &&
+      !this.currentSessionStatus.isFinished;
+
+    if (!hasValidLiveClock && remainingSec !== undefined && remainingSec > 0) {
+      this.clockBaseRemainingSec = remainingSec;
+      this.clockBaseUtcMs = Date.now();
+    }
+
+    const activeStatus = this.getSessionStatus();
+    const effectiveRemaining =
+      (activeStatus.remainingSec !== undefined && activeStatus.remainingSec > 0)
+        ? activeStatus.remainingSec
+        : remainingSec;
+
     this.currentSessionStatus = {
       sessionName: sessionName || this.currentSessionStatus.sessionName,
       sessionType: sessionType || this.currentSessionStatus.sessionType,
       sessionStatus: 'Started',
-      remainingSec: remainingSec !== undefined ? remainingSec : this.currentSessionStatus.remainingSec,
+      remainingSec: effectiveRemaining,
       isFinished: false,
       isChequered: false,
       isExtrapolating: true,
       isStopped: false,
     };
     this.notifySessionStatus();
+    if (this.cachedTimingLines.size > 0) {
+      this.buildAndEmitLeaderboard();
+    }
   }
 
   public getSessionStatus(): F1LiveSessionStatus {
@@ -529,7 +584,9 @@ export class F1LiveWebSocketService {
     const incomingName = data.Name || '';
     const incomingType = data.Type || '';
     const prevName = this.currentSessionStatus.sessionName || '';
-    const hasSessionChanged = Boolean(incomingName && prevName && incomingName !== prevName);
+    const incomingToken = this.normalizeSessionToken(incomingName || incomingType);
+    const prevToken = this.normalizeSessionToken(prevName || this.currentSessionStatus.sessionType);
+    const hasSessionChanged = Boolean(incomingToken && prevToken && incomingToken !== prevToken);
 
     if (hasSessionChanged) {
       const wsKey = `ws-${data.Key || incomingName}`;
