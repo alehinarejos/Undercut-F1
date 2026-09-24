@@ -558,6 +558,14 @@ export const App: React.FC = () => {
       const isFinished = status.isFinished || status.isChequered;
       const isLiveOnTrack = status.sessionStatus === 'Started' && !isFinished;
 
+      // If the UTC schedule says a session is live right now, NEVER let stale WebSocket
+      // 'isFinished' signals (e.g. from cached FP1 data) override it.
+      const scheduledActive = getCurrentScheduledSession();
+      if (isFinished && scheduledActive) {
+        // Session is currently live per schedule — ignore this stale finish signal
+        return;
+      }
+
       if (isFinished) {
         setIsOfficialLive(false);
         setSignalRStatus('connected');

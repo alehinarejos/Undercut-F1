@@ -232,6 +232,15 @@ class ScheduleSyncService {
     const upcomingGp = this.state.schedule.find(g => !g.completed);
     if (!upcomingGp) return;
 
+    const parsedStartMs = new Date(startUtcIso).getTime();
+    const gpStartMs = new Date(`${upcomingGp.startDate}T00:00:00Z`).getTime() - 24 * 3600 * 1000;
+    const gpEndMs = new Date(`${upcomingGp.endDate}T23:59:59Z`).getTime() + 24 * 3600 * 1000;
+    // Ignore stale SessionInfo from past or different Grand Prix weekends
+    if (isNaN(parsedStartMs) || parsedStartMs < gpStartMs || parsedStartMs > gpEndMs) {
+      return;
+    }
+
+    const nowMs = Date.now();
     let updatedAny = false;
     const lowerName = sessionName.toLowerCase();
     const updatedSessions = upcomingGp.sessions.map((sess) => {
@@ -245,6 +254,15 @@ class ScheduleSyncService {
         (sess.type === 'Race' && lowerName.includes('race'));
 
       if (match) {
+        const curStart = new Date(sess.startTimeUtc).getTime();
+        const curEnd = sess.endTimeUtc ? new Date(sess.endTimeUtc).getTime() : curStart + 60 * 60 * 1000;
+        // Never overwrite a session that is currently live in its scheduled window with an already-ended time
+        if (nowMs >= curStart && nowMs < curEnd) {
+          const newEnd = endUtcIso ? new Date(endUtcIso).getTime() : NaN;
+          if (!isNaN(newEnd) && newEnd <= nowMs) {
+            return sess;
+          }
+        }
         updatedAny = true;
         return {
           ...sess,
@@ -271,13 +289,29 @@ class ScheduleSyncService {
     const upcomingGp = this.state.schedule.find(g => !g.completed);
     if (!upcomingGp) return;
 
-    const nowIso = finishedUtc || new Date().toISOString();
     const nowMs = Date.now();
+    if (finishedUtc) {
+      const finMs = new Date(finishedUtc).getTime();
+      // If the finished timestamp is more than 30 minutes old, it belongs to a past session — ignore it
+      if (!isNaN(finMs) && Math.abs(nowMs - finMs) > 30 * 60 * 1000) {
+        return;
+      }
+    }
+
+    const nowIso = finishedUtc || new Date().toISOString();
     const lower = (sessionNameOrType || '').toLowerCase();
     let updated = false;
 
     upcomingGp.sessions = upcomingGp.sessions.map((sess) => {
       const startMs = new Date(sess.startTimeUtc).getTime();
+      const durMin = sess.type === 'Race' ? 120 : sess.type === 'Sprint' ? 45 : 60;
+      const endMs = sess.endTimeUtc ? new Date(sess.endTimeUtc).getTime() : startMs + durMin * 60 * 1000;
+
+      // Never prematurely mark a session as finished while it is still within its scheduled live window
+      if (!isNaN(startMs) && !isNaN(endMs) && nowMs >= startMs && nowMs < endMs) {
+        return sess;
+      }
+
       const matchByName =
         lower &&
         ((sess.type === 'FP1' && (lower.includes('practice 1') || lower.includes('fp1') || lower.includes('libres 1'))) ||
@@ -286,16 +320,13 @@ class ScheduleSyncService {
           (sess.type === 'Qualifying' && (lower.includes('qualifying') || lower.includes('qualy'))) ||
           (sess.type === 'Race' && lower.includes('race')));
 
-      // Or if no name specified, match any session whose start time has already passed or is within 45 min
-      const isCurrentlyActiveWindow = !isNaN(startMs) && nowMs >= startMs - 45 * 60 * 1000 && nowMs <= startMs + 150 * 60 * 1000;
-
-      if (matchByName || (!lower && isCurrentlyActiveWindow)) {
+      if (matchByName && nowMs >= endMs) {
         if (!sess.completed) {
           updated = true;
           return {
             ...sess,
             completed: true,
-            endTimeUtc: nowIso,
+            endTimeUtc: sess.endTimeUtc || nowIso,
           };
         }
       }

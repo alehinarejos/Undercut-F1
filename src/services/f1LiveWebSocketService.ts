@@ -647,7 +647,16 @@ export class F1LiveWebSocketService {
         status === 'Ends' ||
         status === 'Aborted';
 
-      if (isFinished) {
+      // If the finished timestamp is older than 90 min, it's stale data from a previous session
+      let isStaleFinish = false;
+      if (isFinished && finishedUtc) {
+        const finMs = new Date(finishedUtc).getTime();
+        if (!isNaN(finMs) && (Date.now() - finMs) > 90 * 60 * 1000) {
+          isStaleFinish = true;
+        }
+      }
+
+      if (isFinished && !isStaleFinish) {
         this.clockBaseRemainingSec = 0;
         scheduleSyncService.markSessionFinished(
           this.currentSessionStatus.sessionName || this.currentSessionStatus.sessionType,
@@ -657,15 +666,15 @@ export class F1LiveWebSocketService {
 
       this.currentSessionStatus = {
         ...this.currentSessionStatus,
-        sessionStatus: (isFinished ? 'Finished' : status) as any,
-        finishedUtc: finishedUtc || this.currentSessionStatus.finishedUtc,
-        remainingSec: isFinished ? 0 : this.currentSessionStatus.remainingSec,
-        remaining: isFinished ? '00:00:00' : this.currentSessionStatus.remaining,
-        isFinished,
-        isChequered: isFinished,
+        sessionStatus: (isFinished && !isStaleFinish ? 'Finished' : status) as any,
+        finishedUtc: (finishedUtc && !isStaleFinish) ? finishedUtc : this.currentSessionStatus.finishedUtc,
+        remainingSec: (isFinished && !isStaleFinish) ? 0 : this.currentSessionStatus.remainingSec,
+        remaining: (isFinished && !isStaleFinish) ? '00:00:00' : this.currentSessionStatus.remaining,
+        isFinished: isFinished && !isStaleFinish,
+        isChequered: isFinished && !isStaleFinish,
       };
 
-      if (isFinished && !this.currentSessionStatus.isFinished) {
+      if (isFinished && !isStaleFinish && !this.currentSessionStatus.isFinished) {
         standingsSyncService.triggerRaceFinished();
       }
       this.notifySessionStatus();
@@ -700,15 +709,29 @@ export class F1LiveWebSocketService {
       this.clockBaseUtcMs = Date.now();
     }
 
+    // Determine if the clock data itself is stale (arrived from a past session cached snapshot)
+    let clockDataIsStale = false;
+    if (data.Utc) {
+      const clockUtcMs = new Date(data.Utc).getTime();
+      if (!isNaN(clockUtcMs)) {
+        const ageMs = Date.now() - clockUtcMs;
+        // If the clock timestamp is older than 90 minutes, treat it as stale historic data
+        clockDataIsStale = ageMs > 90 * 60 * 1000;
+      }
+    }
+
     const clockReachedZero =
-      remainingStr === '00:00:00' ||
-      remainingStr === '00:00' ||
-      (baseRemainingSec > 0 && remainingSec === 0);
+      !clockDataIsStale && (
+        remainingStr === '00:00:00' ||
+        remainingStr === '00:00' ||
+        (baseRemainingSec > 0 && remainingSec === 0)
+      );
 
     const isFinished =
-      this.currentSessionStatus.sessionStatus === 'Finished' ||
-      this.currentSessionStatus.isFinished ||
-      clockReachedZero;
+      (this.currentSessionStatus.sessionStatus === 'Finished' ||
+       this.currentSessionStatus.isFinished ||
+       clockReachedZero) &&
+      !clockDataIsStale;
 
     if (isFinished) {
       remainingSec = 0;
@@ -718,8 +741,14 @@ export class F1LiveWebSocketService {
       );
     }
 
+    // If the clock data is stale, restore our previously known remaining time
+    if (clockDataIsStale && this.clockBaseRemainingSec !== null && this.clockBaseRemainingSec > 0) {
+      const elapsed = Math.max(0, (Date.now() - (this.clockBaseUtcMs || Date.now())) / 1000);
+      remainingSec = Math.max(0, Math.round(this.clockBaseRemainingSec - elapsed));
+    }
+
     const isRedFlag = this.currentSessionStatus.trackStatus === '5';
-    const isStopped = !isExtrapolating || isRedFlag || isFinished;
+    const isStopped = (!isExtrapolating && !clockDataIsStale) || isRedFlag || isFinished;
     this.currentSessionStatus = {
       ...this.currentSessionStatus,
       remaining: isFinished ? '00:00:00' : remainingStr,
