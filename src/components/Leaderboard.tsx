@@ -656,7 +656,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
 
                 {/* 2. DRIVER (Logo + Driver Abbreviation Code) */}
                 <div className="cell-driver-with-logo" style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                  <TeamLogo team={entry.driver.team} color={entry.driver.teamColor} size={26} />
+                  <TeamLogo team={entry.driver.team} color={entry.driver.teamColor} size={30} />
                   <span className="driver-code" style={{
                     fontFamily: 'var(--font-display)',
                     fontWeight: 900,

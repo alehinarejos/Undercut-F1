@@ -135,7 +135,7 @@ export const FastestBySector: React.FC<FastestBySectorProps> = ({ entries }) => 
             </span>
             {s1BestEntry && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <TeamLogo team={s1BestEntry.driver.team} size={18} />
+                <TeamLogo team={s1BestEntry.driver.team} size={24} />
                 <span style={{
                   fontFamily: 'var(--font-display)',
                   fontWeight: 800,
@@ -183,7 +183,7 @@ export const FastestBySector: React.FC<FastestBySectorProps> = ({ entries }) => 
             </span>
             {s2BestEntry && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <TeamLogo team={s2BestEntry.driver.team} size={18} />
+                <TeamLogo team={s2BestEntry.driver.team} size={24} />
                 <span style={{
                   fontFamily: 'var(--font-display)',
                   fontWeight: 800,
@@ -231,7 +231,7 @@ export const FastestBySector: React.FC<FastestBySectorProps> = ({ entries }) => 
             </span>
             {s3BestEntry && (
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <TeamLogo team={s3BestEntry.driver.team} size={18} />
+                <TeamLogo team={s3BestEntry.driver.team} size={24} />
                 <span style={{
                   fontFamily: 'var(--font-display)',
                   fontWeight: 800,

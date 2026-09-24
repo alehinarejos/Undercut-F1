@@ -21,7 +21,7 @@
 
 .leaderboard-header-row {
   display: grid;
-  grid-template-columns: 28px 84px 64px 60px 80px 80px minmax(360px, 4fr) 46px 54px 54px;
+  grid-template-columns: 28px 108px 64px 60px 80px 80px minmax(336px, 4fr) 46px 54px 54px;
   gap: 8px;
   padding: 6px 12px;
   background: rgba(0, 0, 0, 0.85);
@@ -58,7 +58,7 @@
 
 .leaderboard-row {
   display: grid;
-  grid-template-columns: 28px 84px 64px 60px 80px 80px minmax(360px, 4fr) 46px 54px 54px;
+  grid-template-columns: 28px 108px 64px 60px 80px 80px minmax(336px, 4fr) 46px 54px 54px;
   gap: 8px;
   padding: 0 12px;
   height: 48px;

@@ -135,7 +135,7 @@ const TEAM_ASSET_MAP: Record<string, {
   },
 };
 
-export const TeamLogo: React.FC<TeamLogoProps> = ({ team, size = 20 }) => {
+export const TeamLogo: React.FC<TeamLogoProps> = ({ team, size = 30 }) => {
   const [imgError, setImgError] = useState(false);
   const normalized = (team || '').toLowerCase();
 
@@ -153,21 +153,22 @@ export const TeamLogo: React.FC<TeamLogoProps> = ({ team, size = 20 }) => {
   else if (normalized.includes('rb') || normalized.includes('cash app') || normalized.includes('racing bulls')) teamKey = 'rb';
 
   const logoData = TEAM_ASSET_MAP[teamKey] || TEAM_ASSET_MAP.ferrari;
+  const effectiveHeight = Math.round(size * 1.28);
+  const effectiveWidth = Math.round(size * 1.45);
 
   return (
     <div
       style={{
-        width: size,
-        height: size,
-        minWidth: size,
+        width: effectiveWidth,
+        height: effectiveHeight,
+        minWidth: effectiveWidth,
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
         position: 'relative',
-        borderRadius: '3px',
-        overflow: 'hidden',
-        background: 'rgba(0, 0, 0, 0.25)',
+        borderRadius: '4px',
+        overflow: 'visible',
       }}
       title={team || logoData.name}
     >
@@ -180,7 +181,9 @@ export const TeamLogo: React.FC<TeamLogoProps> = ({ team, size = 20 }) => {
             width: '100%',
             height: '100%',
             objectFit: 'contain',
-            padding: '1px',
+            padding: 0,
+            transform: 'scale(1.12)',
+            filter: 'drop-shadow(0 1px 3px rgba(0, 0, 0, 0.7))',
           }}
           loading="lazy"
         />
