@@ -270,7 +270,7 @@ export const Header: React.FC<HeaderProps> = ({
 
               <div className="session-divider" />
 
-              {session.type === 'RACE' || session.type === 'SPRINT' || (session.totalLaps && session.totalLaps > 0) ? (
+              {(session.type === 'RACE' || session.type === 'SPRINT') && (!activeTimelineSession || activeTimelineSession.session.type === 'Race' || activeTimelineSession.session.type === 'Sprint') ? (
                 <div className="session-lap-counter">
                   <span className="lap-label">{t('lap_upper')}</span>
                   <span className="lap-value" style={{ fontSize: '0.94rem', fontWeight: 900, color: '#fff' }}>{session.currentLap || 18}</span>
@@ -291,7 +291,7 @@ export const Header: React.FC<HeaderProps> = ({
                     {(() => {
                       const mins = Math.floor(remainingSec / 60);
                       const secs = Math.floor(remainingSec % 60);
-                      return `${mins}:${secs.toString().padStart(2, '0')}`;
+                      return `${String(mins).padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
                     })()}
                   </span>
                   {session.trackStatus === 'RED' && (

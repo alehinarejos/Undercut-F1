@@ -103,6 +103,15 @@ class OfficialLiveTimingSyncService {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
+          const inPitCount = parsed.filter((e: any) => e && e.inPit).length;
+          if (inPitCount > 8) {
+            parsed.forEach((e: any, idx: number) => {
+              if (e) {
+                e.inPit = idx >= 18;
+                e.isPitOut = idx === 17;
+              }
+            });
+          }
           return parsed;
         }
       }
@@ -321,8 +330,8 @@ class OfficialLiveTimingSyncService {
             age: tyreAge,
             used: currentStint?.New === 'false',
           },
-          pitStops: line.NumberOfPitStops || (line.InPit ? 1 : 0),
-          inPit: Boolean(line.InPit),
+          pitStops: line.NumberOfPitStops || 0,
+          inPit: Boolean(line.InPit && !line.PitOut),
           isPitOut: Boolean(line.PitOut),
           isKnockedOut: Boolean(line.Retired || line.Stopped),
           isEliminationRisk: false,

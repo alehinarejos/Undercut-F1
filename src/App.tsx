@@ -102,6 +102,7 @@ export const App: React.FC = () => {
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed) && parsed.length > 0) {
+            const inPitCount = parsed.filter((e: any) => e && e.inPit).length;
             parsed.forEach((entry: any, i: number) => {
               const age = i === 0 ? 18 : i === 1 ? 18 : i === 2 ? 8 : ((i * 2 + 3) % 15) + 4;
               if (!entry.tyre || entry.tyre.age === 0) {
@@ -113,6 +114,10 @@ export const App: React.FC = () => {
               }
               if (!entry.lapsCompleted || entry.lapsCompleted < 10) {
                 entry.lapsCompleted = i >= 17 ? 17 : 18;
+              }
+              if (inPitCount > 8) {
+                entry.inPit = i >= 18;
+                entry.isPitOut = i === 17;
               }
             });
             return parsed;
@@ -255,18 +260,21 @@ export const App: React.FC = () => {
   useEffect(() => {
     const detectSession = () => {
       const active = getCurrentScheduledSession();
-      
+      const wsStatus = f1LiveWebSocketService.getSessionStatus();
+      const isWsLive = wsStatus.sessionStatus === 'Started' && !wsStatus.isFinished && !wsStatus.isChequered;
+      const isSignalRLive = f1SignalR.getStatus() === 'live_streaming';
+
       if (active) {
         const key = `${active.gp.circuitId}-${active.sess.type}-${active.sess.startTimeUtc}`;
         const isNewSession = activeSessionKeyRef.current !== key;
+        const engineType: SessionState['type'] =
+          active.sess.type === 'Race' ? 'RACE' :
+          active.sess.type === 'Sprint' ? 'SPRINT' :
+          (active.sess.type === 'Qualifying' || active.sess.type === 'Sprint Qualifying') ? 'QUALIFYING' : 'PRACTICE';
 
         if (isNewSession) {
           activeSessionKeyRef.current = key;
-          // Map session type
-          const engineType: SessionState['type'] =
-            active.sess.type === 'Race' ? 'RACE' :
-            active.sess.type === 'Sprint' ? 'SPRINT' :
-            (active.sess.type === 'Qualifying' || active.sess.type === 'Sprint Qualifying') ? 'QUALIFYING' : 'PRACTICE';
+          engine.setCircuit(active.gp.circuitId);
 
           // Reset engine for the new session
           engine.resetForNewSession(
@@ -279,16 +287,30 @@ export const App: React.FC = () => {
           loadedSessionKeyRef.current = null;
 
           console.info(`[SessionManager] New session detected: ${active.sess.name} at ${active.gp.name}. Remaining: ${Math.round(active.remainingSec)}s`);
+        } else {
+          // Keep remaining duration synced with schedule unless WebSocket clock is actively providing it
+          if (!wsStatus.remainingSec || wsStatus.remainingSec <= 0) {
+            engine.updateLiveSessionState({
+              name: `${active.gp.name} - ${active.sess.name}`,
+              type: engineType,
+              timeRemainingSec: active.remainingSec,
+              totalLaps: (engineType === 'RACE' || engineType === 'SPRINT') ? undefined : 0,
+            });
+          }
         }
+        setIsOfficialLive(true);
+        engine.setSessionEnded(false);
+      } else if (isWsLive || isSignalRLive) {
+        // Official WebSocket or SignalR is actively streaming a session
         setIsOfficialLive(true);
         engine.setSessionEnded(false);
       } else {
         // No official session live right now
         if (activeSessionKeyRef.current !== null) {
           activeSessionKeyRef.current = null;
+          engine.setSessionEnded(true);
         }
         setIsOfficialLive(false);
-        engine.setSessionEnded(true);
         if (!engine.isEngineRunning()) {
           engine.start();
         }
@@ -316,14 +338,27 @@ export const App: React.FC = () => {
         }
       },
       onTrackStatus: (trackStatus) => {
+        const mappedTrack: TrackStatus = trackStatus.status === '1' ? 'GREEN' : trackStatus.status === '2' ? 'YELLOW' : 'GREEN';
+        engine.updateLiveSessionState({
+          trackStatus: mappedTrack,
+          safetyCarDeployed: trackStatus.status === '4',
+          vscDeployed: trackStatus.status === '6',
+        });
         setSession(prev => ({
           ...prev,
-          trackStatus: trackStatus.status === '1' ? 'GREEN' : trackStatus.status === '2' ? 'YELLOW' : 'GREEN',
+          trackStatus: mappedTrack,
           safetyCarDeployed: trackStatus.status === '4',
           vscDeployed: trackStatus.status === '6',
         }));
       },
       onWeatherData: (weather) => {
+        engine.updateLiveSessionState({
+          airTemp: weather.airTemp,
+          trackTemp: weather.trackTemp,
+          humidity: weather.humidity,
+          windSpeed: weather.windSpeed,
+          rainProbability: weather.rainfall ? 95 : 0,
+        });
         setSession(prev => ({
           ...prev,
           airTemp: weather.airTemp,
@@ -336,6 +371,25 @@ export const App: React.FC = () => {
       onTimingData: (timingData) => {
         if (timingData) {
           engine.ingestSignalRTimingData(timingData);
+        }
+      },
+      onSessionInfo: (sessionInfo) => {
+        if (sessionInfo && typeof sessionInfo === 'object') {
+          const rawName = String(sessionInfo.Name || '');
+          const rawType = String(sessionInfo.Type || '');
+          const isQualy = rawType.toLowerCase().includes('qual') || rawName.toLowerCase().includes('qual');
+          const sessType: SessionState['type'] = isQualy
+            ? 'QUALIFYING'
+            : rawType.toLowerCase().includes('race')
+            ? 'RACE'
+            : rawType.toLowerCase().includes('sprint')
+            ? 'SPRINT'
+            : 'PRACTICE';
+          engine.updateLiveSessionState({
+            name: rawName || undefined,
+            type: sessType,
+            totalLaps: (sessType === 'PRACTICE' || sessType === 'QUALIFYING') ? 0 : undefined,
+          });
         }
       },
       onRaceControl: (rawMsg) => {
@@ -377,6 +431,10 @@ export const App: React.FC = () => {
         };
 
         if (flag === 'RED' || flag === 'YELLOW' || flag === 'CHEQUERED' || flag === 'GREEN') {
+          engine.updateLiveSessionState({
+            trackStatus: flag,
+            safetyCarDeployed: category === 'SAFETY_CAR',
+          });
           setSession(prev => ({
             ...prev,
             trackStatus: flag,
@@ -392,12 +450,27 @@ export const App: React.FC = () => {
           const isExtrapolating = clockData.Extrapolating !== false;
           if (remaining && typeof remaining === 'string') {
             const parts = remaining.split(':').map(Number);
-            let sec = 0;
-            if (parts.length === 3) sec = parts[0] * 3600 + parts[1] * 60 + parts[2];
-            else if (parts.length === 2) sec = parts[0] * 60 + parts[1];
+            let baseSec = 0;
+            if (parts.length === 3) baseSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
+            else if (parts.length === 2) baseSec = parts[0] * 60 + parts[1];
+
+            let sec = baseSec;
+            if (isExtrapolating && clockData.Utc) {
+              const clockUtcMs = new Date(clockData.Utc).getTime();
+              if (!isNaN(clockUtcMs)) {
+                const elapsedSec = Math.max(0, (Date.now() - clockUtcMs) / 1000);
+                sec = Math.max(0, Math.round(baseSec - elapsedSec));
+              }
+            }
+
+            if (sec > 0) {
+              engine.updateLiveSessionState({
+                timeRemainingSec: sec,
+              });
+            }
             setSession(prev => ({
               ...prev,
-              timeRemainingSec: sec,
+              timeRemainingSec: sec > 0 ? sec : prev.timeRemainingSec,
               trackStatus: !isExtrapolating && prev.trackStatus !== 'CHEQUERED' ? 'RED' : prev.trackStatus,
             }));
           }
@@ -411,7 +484,7 @@ export const App: React.FC = () => {
     return () => {
       f1SignalR.disconnect();
     };
-  }, []);
+  }, [engine]);
 
   // Fetch status message from official API (but DON'T override isOfficialLive — handled by schedule detector above)
   const checkStatus = async () => {
@@ -440,8 +513,8 @@ export const App: React.FC = () => {
     f1LiveWebSocketService.startConnection();
 
     const unsubscribeStatus = f1LiveWebSocketService.subscribeSessionStatus((status) => {
-      const isFinished = status.isFinished || status.isChequered || status.remaining === '00:00:00';
-      const isLiveOnTrack = status.sessionStatus === 'Started' && !isFinished && (status.remainingSec === undefined || status.remainingSec > 0);
+      const isFinished = status.isFinished || status.isChequered;
+      const isLiveOnTrack = status.sessionStatus === 'Started' && !isFinished;
 
       if (isFinished) {
         setIsOfficialLive(false);
@@ -487,6 +560,21 @@ export const App: React.FC = () => {
           ? 'SPRINT'
           : 'PRACTICE';
 
+        const activeSched = getCurrentScheduledSession();
+        const resolvedRemainingSec = (status.remainingSec !== undefined && status.remainingSec > 0)
+          ? status.remainingSec
+          : (activeSched?.remainingSec || undefined);
+
+        engine.updateLiveSessionState({
+          name: status.sessionName || undefined,
+          type: status.sessionType ? sessType : undefined,
+          trackStatus: status.safetyCar ? 'SC' : status.vsc ? 'VSC' : 'GREEN',
+          safetyCarDeployed: !!status.safetyCar,
+          vscDeployed: !!status.vsc,
+          timeRemainingSec: resolvedRemainingSec,
+          totalLaps: (sessType === 'PRACTICE' || sessType === 'QUALIFYING') ? 0 : undefined,
+        });
+
         setSession(prev => ({
           ...prev,
           name: status.sessionName || prev.name,
@@ -494,7 +582,8 @@ export const App: React.FC = () => {
           trackStatus: status.safetyCar ? 'SC' : status.vsc ? 'VSC' : 'GREEN',
           safetyCarDeployed: !!status.safetyCar,
           vscDeployed: !!status.vsc,
-          timeRemainingSec: status.remainingSec !== undefined ? status.remainingSec : prev.timeRemainingSec,
+          timeRemainingSec: resolvedRemainingSec !== undefined ? resolvedRemainingSec : prev.timeRemainingSec,
+          totalLaps: (sessType === 'PRACTICE' || sessType === 'QUALIFYING') ? 0 : prev.totalLaps,
         }));
       }
     });
@@ -623,6 +712,10 @@ export const App: React.FC = () => {
                     onSelectDriver={handleSelectDriver}
                     isQualifying={session.type === 'QUALIFYING'}
                     sessionType={session.type}
+                    sessionName={session.name}
+                    timeRemainingSec={session.timeRemainingSec}
+                    totalLaps={session.totalLaps}
+                    trackStatus={session.trackStatus}
                   />
                 </div>
 

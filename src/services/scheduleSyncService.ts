@@ -10,8 +10,8 @@ export interface ScheduleSyncState {
   source: string;
 }
 
-const STORAGE_KEY_LAST_CHECK = 'f1_schedule_last_weekly_check_v3';
-const STORAGE_KEY_CUSTOM_SCHEDULE = 'f1_schedule_synced_2026_v3';
+const STORAGE_KEY_LAST_CHECK = 'f1_schedule_last_weekly_check_v4';
+const STORAGE_KEY_CUSTOM_SCHEDULE = 'f1_schedule_synced_2026_v4';
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 class ScheduleSyncService {
@@ -200,11 +200,27 @@ class ScheduleSyncService {
   public updateFromSignalRSessionInfo(sessionInfo: any): void {
     if (!sessionInfo) return;
     const sessionName = sessionInfo.Name || sessionInfo.Type;
-    const startDate = sessionInfo.StartDate; // e.g. "2026-09-11T11:30:00"
+    const startDate = sessionInfo.StartDate; // e.g. "2026-09-24T13:00:00" (local track time)
+    const gmtOffset = sessionInfo.GmtOffset; // e.g. "04:00:00" or "-05:00:00"
 
     if (!startDate || !sessionName) return;
 
-    // Find next upcoming race (e.g. Madrid R16)
+    let utcIso = startDate.endsWith('Z') ? startDate : `${startDate}Z`;
+    if (!startDate.endsWith('Z') && gmtOffset && typeof gmtOffset === 'string') {
+      const cleanOffset = gmtOffset.trim();
+      // Format "+04:00" or "-05:00" from "04:00:00"
+      const sign = cleanOffset.startsWith('-') ? '-' : '+';
+      const parts = cleanOffset.replace(/^[+-]/, '').split(':');
+      if (parts.length >= 2) {
+        const isoWithOffset = `${startDate}${sign}${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+        const parsed = new Date(isoWithOffset);
+        if (!isNaN(parsed.getTime())) {
+          utcIso = parsed.toISOString();
+        }
+      }
+    }
+
+    // Find next upcoming race
     const upcomingGp = this.state.schedule.find(g => !g.completed);
     if (!upcomingGp) return;
 
@@ -221,7 +237,7 @@ class ScheduleSyncService {
         updatedAny = true;
         return {
           ...sess,
-          startTimeUtc: startDate.endsWith('Z') ? startDate : `${startDate}Z`,
+          startTimeUtc: utcIso,
           hasOfficialTime: true,
         };
       }

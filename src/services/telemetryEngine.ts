@@ -207,14 +207,14 @@ export class TelemetryEngine {
 
 
     this.session = {
-      id: 'session-2026-r16-madrid',
+      id: 'session-2026-r17-fp1',
       circuit: madridCircuit,
-      type: 'RACE',
-      name: 'Gran Premio de España 2026 (Madrid)',
+      type: 'PRACTICE',
+      name: 'Libres 1 (FP1)',
       trackStatus: 'GREEN',
-      currentLap: 18,
-      totalLaps: 55, // Madrid GP: 55 laps (5.474 km x 55 = 301.07 km)
-      timeRemainingSec: 0,
+      currentLap: 0,
+      totalLaps: 0,
+      timeRemainingSec: 3000,
       airTemp: 24.8,
       trackTemp: 37.5,
       humidity: 36,
@@ -259,7 +259,7 @@ export class TelemetryEngine {
       343, 343, 344, 342, 341, 342, 343, 340, 341, 340, 339, 341
     ];
 
-    // Realistic initial distribution of cars around the 5.414 km Madrid circuit during FP1
+    // Realistic initial distribution of cars around the 5.414 km circuit during FP1
     const initialProgressMap: number[] = [
       0.88, // ANT - Exiting Turn 20, finishing flying lap
       0.74, // RUS - Turn 15-16 chicane entry
@@ -341,6 +341,16 @@ export class TelemetryEngine {
           entry.lapsCompleted = entry.tyre.age;
         });
       }
+
+      // Fix corrupted inPit state where all drivers were marked IN PIT by sessionEnded
+      const inPitCount = savedLiveEntries.filter(e => e.inPit).length;
+      if (inPitCount > 8) {
+        savedLiveEntries.forEach((entry, i) => {
+          entry.inPit = i >= 18;
+          entry.isPitOut = i === 17;
+        });
+      }
+
       this.leaderboard = savedLiveEntries;
     } else {
       // Standard driver starting grid from official 2026 driver roster
@@ -793,6 +803,23 @@ export class TelemetryEngine {
   }
 
   /**
+   * Synchronize live session state directly into the engine so tick() preserves live remaining duration & type
+   */
+  public updateLiveSessionState(partial: Partial<SessionState>) {
+    this.session = {
+      ...this.session,
+      ...partial,
+    };
+    if (this.session.type === 'PRACTICE' || this.session.type === 'QUALIFYING') {
+      this.session.totalLaps = 0;
+      if (this.session.timeRemainingSec <= 0 && !this.sessionEnded) {
+        this.session.timeRemainingSec = 3000;
+      }
+    }
+    this.emitCurrentState();
+  }
+
+  /**
    * Reset the leaderboard state for a brand new session.
    * Clears all lap times, sector times, gaps, and track progress.
    * Called when the official schedule shows a new session has started.
@@ -801,9 +828,10 @@ export class TelemetryEngine {
     this.sessionEnded = false;
     this.session.type = sessionType;
     this.session.name = sessionName;
-    this.session.timeRemainingSec = durationSec;
+    this.session.timeRemainingSec = Math.max(60, durationSec);
     this.session.trackStatus = 'GREEN';
     this.session.currentLap = 0;
+    this.session.totalLaps = (sessionType === 'RACE' || sessionType === 'SPRINT') ? (this.circuit.laps || 55) : 0;
     this.session.safetyCarDeployed = false;
     this.session.vscDeployed = false;
     this.session.redFlagDeployed = false;
@@ -818,6 +846,15 @@ export class TelemetryEngine {
         if (raw) {
           const parsed = JSON.parse(raw);
           if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.bestLapTime && parsed[0].bestLapTime !== '--:--.---') {
+            const inPitCount = parsed.filter((e: any) => e && e.inPit).length;
+            if (inPitCount > 8) {
+              parsed.forEach((e: any, idx: number) => {
+                if (e) {
+                  e.inPit = idx >= 18;
+                  e.isPitOut = idx === 17;
+                }
+              });
+            }
             this.leaderboard = parsed;
             hasSavedData = true;
           }
@@ -840,7 +877,7 @@ export class TelemetryEngine {
         entry.gapToAhead = idx === 0 ? 'LEADER' : '--';
         entry.intervalNum = 0;
         entry.lastLapTimeNum = 0;
-        entry.inPit = false;
+        entry.inPit = idx >= 18;
         entry.isPitOut = false;
         entry.tyre.age = 0;
         // Distribute cars around track
@@ -1329,6 +1366,8 @@ export class TelemetryEngine {
     }
   }
 
+  private pitTimerMap = new Map<string, number>();
+
   public setSessionEnded(ended: boolean) {
     this.sessionEnded = ended;
     if (ended) {
@@ -1336,9 +1375,6 @@ export class TelemetryEngine {
       this.session.timeRemainingSec = 0;
       this.hasLiveCarData = false;
       this.liveCarDataMap.clear();
-      this.leaderboard.forEach(e => {
-        e.inPit = true;
-      });
       // Set all telemetry to 0 immediately
       for (const entry of this.leaderboard) {
         this.telemetryMap.set(entry.driver.id, {
@@ -1359,6 +1395,14 @@ export class TelemetryEngine {
     } else {
       if (this.session.trackStatus === 'CHEQUERED') {
         this.session.trackStatus = 'GREEN';
+      }
+      // Restore normal pit states if all cars were previously parked
+      const inPitCount = this.leaderboard.filter(e => e.inPit).length;
+      if (inPitCount > 8) {
+        this.leaderboard.forEach((e, idx) => {
+          e.inPit = idx >= 18;
+          e.isPitOut = idx === 17;
+        });
       }
     }
   }
@@ -1594,6 +1638,7 @@ export class TelemetryEngine {
       this.session.trackStatus === 'CHEQUERED';
 
     if (!isSessionStopped && (this.session.type === 'PRACTICE' || this.session.type === 'QUALIFYING')) {
+      this.session.totalLaps = 0;
       if (this.session.timeRemainingSec > 0) {
         this.session.timeRemainingSec = Math.max(0, this.session.timeRemainingSec - dt);
         if (this.session.timeRemainingSec === 0 && !this.sessionEnded) {
@@ -1609,9 +1654,9 @@ export class TelemetryEngine {
             category: 'FLAG',
           });
         }
-      } else {
-        this.session.trackStatus = 'CHEQUERED';
-        this.sessionEnded = true;
+      } else if (!this.isLiveMode && !this.hasLiveOfficialData) {
+        // Default to 50m remaining if uninitialized in Practice/Qualy
+        this.session.timeRemainingSec = 3000;
       }
     }
 
@@ -1619,11 +1664,12 @@ export class TelemetryEngine {
     this.maybeGenerateRaceControlEvent(dt);
     this.maybePerformOvertake();
 
+    const isLive = this.isLiveMode || this.hasLiveOfficialData;
+
     // Update car positions & physics
     this.leaderboard.forEach((entry, idx) => {
       // When session has finished (Chequered flag), all cars are parked in boxes / garages
       if (isSessionStopped) {
-        entry.inPit = true;
         this.telemetryMap.set(entry.driver.id, {
           driverId: entry.driver.id,
           speed: 0,
@@ -1641,6 +1687,23 @@ export class TelemetryEngine {
         return;
       }
 
+      // Realistic Pit / Garage duration handling when in simulation / fallback mode
+      if (!isLive && entry.inPit) {
+        const curTimer = (this.pitTimerMap.get(entry.driver.id) || 0) + dt;
+        const targetPitSec = 22 + (idx % 4) * 5; // 22s to 37s in pit
+        if (curTimer >= targetPitSec) {
+          this.pitTimerMap.delete(entry.driver.id);
+          entry.inPit = false;
+          entry.isPitOut = true;
+          entry.trackProgress = 0.02;
+          setTimeout(() => {
+            entry.isPitOut = false;
+          }, 9000);
+        } else {
+          this.pitTimerMap.set(entry.driver.id, curTimer);
+        }
+      }
+
       // Driver individual pace multiplier (~0.985 to 1.037)
       let speedFactor = 1.0;
       if (idx === 0) speedFactor = 1.037; // P1 pace
@@ -1656,7 +1719,9 @@ export class TelemetryEngine {
         const live = this.liveCarDataMap.get(entry.driver.number)!;
         instantSpeedKmh = live.speed;
       } else if (entry.inPit) {
-        instantSpeedKmh = (this.sessionEnded || this.session.trackStatus === 'CHEQUERED') ? 0 : 78;
+        instantSpeedKmh = 0;
+      } else if (entry.isPitOut) {
+        instantSpeedKmh = 165;
       } else {
         const phys = this.getCircuitInstantPhysics(entry.trackProgress, this.circuit.id);
         instantSpeedKmh = Math.max(70, phys.speedKmh * speedFactor);
@@ -1668,12 +1733,11 @@ export class TelemetryEngine {
       const progressDelta = (speedMps * dt) / trackLengthMeters;
 
       const oldProgress = entry.trackProgress;
-      let newProgress = oldProgress + progressDelta;
-
-      const isLive = this.isLiveMode || this.hasLiveOfficialData;
+      let newProgress = entry.inPit ? oldProgress : oldProgress + progressDelta;
 
       // Track S1 crossing (~0.333) - only simulate if NOT in live official mode
       if (oldProgress < 0.333 && newProgress >= 0.333 && !entry.inPit && !isLive) {
+        if (entry.isPitOut) entry.isPitOut = false;
         this.handleSector1Crossed(entry, idx);
       }
 
@@ -1694,26 +1758,20 @@ export class TelemetryEngine {
           }
         }
         // Increment tyre age
-        if (!isLive) {
+        if (!isLive && !entry.inPit) {
           entry.tyre.age += 1;
         }
 
-        // Exit pit lane if was in pit
-        if (entry.inPit && !isLive) {
-          entry.inPit = false;
-          entry.isPitOut = true;
-          setTimeout(() => {
-            entry.isPitOut = false;
-          }, 4000);
-        }
-
-        // Random pit stop trigger for realism when tyre age > 24 (simulation only)
-        if (!isLive && entry.tyre.age > 24 && Math.random() < 0.08 && !entry.inPit) {
+        // Realistic pit stop trigger in Practice (every ~7-9 laps if <= 3 cars currently in pit) or Race (> 24 laps)
+        const currentCarsInPit = this.leaderboard.filter(e => e.inPit).length;
+        const pitThreshold = (this.session.type === 'PRACTICE' || this.session.type === 'QUALIFYING') ? 7 : 24;
+        if (!isLive && !entry.inPit && currentCarsInPit < 4 && entry.tyre.age >= pitThreshold && Math.random() < 0.14) {
           entry.inPit = true;
-          entry.pitStops += 1;
+          entry.isPitOut = false;
+          entry.pitStops = (entry.pitStops || 0) + 1;
           entry.tyre.age = 0;
-          // Change compound
-          entry.tyre.compound = entry.tyre.compound === 'SOFT' ? 'MEDIUM' : 'HARD';
+          this.pitTimerMap.set(entry.driver.id, 0);
+          entry.tyre.compound = entry.tyre.compound === 'SOFT' ? 'MEDIUM' : 'SOFT';
         }
       }
 
@@ -1727,8 +1785,6 @@ export class TelemetryEngine {
       const telemetry = this.calculateTelemetryForProgress(entry.driver.id, newProgress, entry.inPit);
       this.telemetryMap.set(entry.driver.id, telemetry);
     });
-
-    const isLive = this.isLiveMode || this.hasLiveOfficialData;
 
     if (!isLive) {
       const isPracticeOrQualy = this.session.type === 'PRACTICE' || this.session.type === 'QUALIFYING';
@@ -1895,18 +1951,30 @@ export class TelemetryEngine {
       }
 
       // Update Lap Times
+      let hasNewLapOrSector = false;
       if (lineData.LastLapTime?.Value) {
         entry.currentLapTime = lineData.LastLapTime.Value;
+        hasNewLapOrSector = true;
       }
       if (lineData.BestLapTime?.Value) {
         entry.bestLapTime = lineData.BestLapTime.Value;
+        hasNewLapOrSector = true;
       }
 
       // Update Sectors
       if (Array.isArray(lineData.Sectors)) {
-        if (lineData.Sectors[0]?.Value) entry.s1Time = lineData.Sectors[0].Value;
-        if (lineData.Sectors[1]?.Value) entry.s2Time = lineData.Sectors[1].Value;
-        if (lineData.Sectors[2]?.Value) entry.s3Time = lineData.Sectors[2].Value;
+        if (lineData.Sectors[0]?.Value) {
+          entry.s1Time = lineData.Sectors[0].Value;
+          hasNewLapOrSector = true;
+        }
+        if (lineData.Sectors[1]?.Value) {
+          entry.s2Time = lineData.Sectors[1].Value;
+          hasNewLapOrSector = true;
+        }
+        if (lineData.Sectors[2]?.Value) {
+          entry.s3Time = lineData.Sectors[2].Value;
+          hasNewLapOrSector = true;
+        }
 
         if (lineData.Sectors[0]?.OverallFastest) entry.s1Status = 'purple';
         else if (lineData.Sectors[0]?.PersonalFastest) entry.s1Status = 'green';
@@ -1918,16 +1986,26 @@ export class TelemetryEngine {
         else if (lineData.Sectors[2]?.PersonalFastest) entry.s3Status = 'green';
       }
 
-      // Pit Stops & InPit status
+      // Pit Stops & InPit status (mutually exclusive & cleared when setting flying sectors)
       if (lineData.NumberOfPitStops !== undefined) {
         const stops = parseInt(String(lineData.NumberOfPitStops), 10);
         if (!isNaN(stops)) entry.pitStops = stops;
       }
-      if (lineData.InPit !== undefined) {
-        entry.inPit = Boolean(lineData.InPit);
-      }
-      if (lineData.PitOut !== undefined) {
-        entry.isPitOut = Boolean(lineData.PitOut);
+      if (lineData.PitOut === true) {
+        entry.isPitOut = true;
+        entry.inPit = false;
+      } else if (lineData.InPit === true) {
+        entry.inPit = true;
+        entry.isPitOut = false;
+      } else {
+        if (lineData.InPit === false) entry.inPit = false;
+        if (lineData.PitOut === false) entry.isPitOut = false;
+        if (hasNewLapOrSector) {
+          entry.inPit = false;
+          if (lineData.LastLapTime?.Value || lineData.Sectors?.[1]?.Value || lineData.Sectors?.[2]?.Value) {
+            entry.isPitOut = false;
+          }
+        }
       }
       if (lineData.KnockedOut !== undefined) {
         entry.isKnockedOut = Boolean(lineData.KnockedOut);

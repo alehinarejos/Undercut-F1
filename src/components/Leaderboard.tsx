@@ -159,6 +159,10 @@ interface LeaderboardProps {
   onSelectDriver: (driverId: string) => void;
   isQualifying?: boolean;
   sessionType?: string;
+  sessionName?: string;
+  timeRemainingSec?: number;
+  totalLaps?: number;
+  trackStatus?: string;
 }
 
 export const Leaderboard: React.FC<LeaderboardProps> = ({
@@ -166,9 +170,34 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
   selectedDriverId,
   onSelectDriver,
   isQualifying = false,
-  sessionType: _sessionType = 'PRACTICE',
+  sessionType = 'PRACTICE',
+  sessionName = 'Libres 1 (FP1)',
+  timeRemainingSec = 3000,
+  totalLaps = 0,
+  trackStatus = 'GREEN',
 }) => {
   const [viewMode, setViewMode] = useState<'timing' | 'stints'>('timing');
+
+  // Local 1-second ticker so remaining session duration always counts down smoothly in the UI
+  const [localRemainingSec, setLocalRemainingSec] = useState<number>(() =>
+    timeRemainingSec && timeRemainingSec > 0 ? Math.floor(timeRemainingSec) : 3000
+  );
+
+  React.useEffect(() => {
+    if (timeRemainingSec !== undefined && timeRemainingSec > 0) {
+      setLocalRemainingSec(Math.floor(timeRemainingSec));
+    }
+  }, [timeRemainingSec]);
+
+  React.useEffect(() => {
+    const timer = window.setInterval(() => {
+      setLocalRemainingSec((prev) => {
+        if (trackStatus === 'RED' || trackStatus === 'CHEQUERED') return prev;
+        return prev > 0 ? prev - 1 : 0;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [trackStatus]);
 
   // Overtake tracking & animations
   const prevPositionsRef = React.useRef<Map<string, number>>(new Map());
@@ -255,35 +284,120 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
 
   const currentRaceLap = Math.max(1, ...entries.map(e => e.lapsCompleted || e.tyre?.age || 0));
 
+  // Determine whether this session is timed (Practice / Qualifying) vs Lap-based (Race / Sprint)
+  const isTimedSession = sessionType === 'PRACTICE' || sessionType === 'QUALIFYING' || totalLaps === 0 || (sessionName && /fp|practice|libres|qual/i.test(sessionName));
+
+  const formattedSessionBadge = (() => {
+    const lower = (sessionName || '').toLowerCase();
+    if (lower.includes('fp1') || lower.includes('practice 1') || lower.includes('libres 1')) return 'LIBRES 1 (FP1)';
+    if (lower.includes('fp2') || lower.includes('practice 2') || lower.includes('libres 2')) return 'LIBRES 2 (FP2)';
+    if (lower.includes('fp3') || lower.includes('practice 3') || lower.includes('libres 3')) return 'LIBRES 3 (FP3)';
+    if (lower.includes('qual') || sessionType === 'QUALIFYING') return 'CLASIFICACIÓN';
+    if (sessionType === 'SPRINT') return 'SPRINT';
+    if (sessionType === 'RACE') return 'CARRERA';
+    return 'LIBRES 1 (FP1)';
+  })();
+
+  const formattedRemainingTime = (() => {
+    const sec = Math.max(0, localRemainingSec);
+    const mins = Math.floor(sec / 60);
+    const remSecs = Math.floor(sec % 60);
+    return `${String(mins).padStart(2, '0')}:${String(remSecs).padStart(2, '0')}`;
+  })();
+
+  // Guard against corrupted all-in-pit states
+  const rawInPitCount = entries.filter(e => e.inPit).length;
+  const shouldSanitizePits = rawInPitCount > 8 && trackStatus !== 'CHEQUERED';
+  const effectiveInPitCount = entries.filter((e, i) => shouldSanitizePits ? i >= 18 : e.inPit).length;
+  const effectiveOnTrackCount = Math.max(0, entries.length - effectiveInPitCount);
+
   return (
     <div className="f1-card leaderboard-container">
-      {/* Top Header Card Controls: Timing / Stints toggle & Live Lap Counter */}
-      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px' }}>
-        <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      {/* Top Header Card Controls: Timing / Stints toggle & Live Session Duration / Lap Counter */}
+      <div className="card-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', flexWrap: 'wrap', gap: '8px' }}>
+        <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <span style={{ fontSize: '0.92rem', fontWeight: 800, color: '#fff', fontFamily: 'var(--font-display)' }}>
-            Leaderboard
+            Tabla de Tiempos
           </span>
 
-          {/* Lap Counter in Leaderboard Header */}
+          {/* Session Type Badge (e.g. LIBRES 1 (FP1)) */}
           <div style={{
             display: 'inline-flex',
             alignItems: 'center',
             gap: '5px',
-            background: 'rgba(225, 6, 0, 0.16)',
-            border: '1px solid rgba(225, 6, 0, 0.35)',
+            background: 'rgba(225, 6, 0, 0.18)',
+            border: '1px solid rgba(225, 6, 0, 0.45)',
             padding: '2px 8px',
             borderRadius: '6px',
-            marginLeft: '6px',
+            marginLeft: '4px',
           }}>
-            <span style={{ fontSize: '0.62rem', fontWeight: 800, color: '#ff4d4d', letterSpacing: '0.5px' }}>
-              LAP
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ff4d4d', boxShadow: '0 0 6px #ff4d4d' }} />
+            <span style={{ fontSize: '0.66rem', fontWeight: 900, color: '#ffffff', letterSpacing: '0.04em', fontFamily: 'var(--font-display)' }}>
+              {formattedSessionBadge}
             </span>
-            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 900, fontSize: '0.86rem', color: '#ffffff' }}>
-              {currentRaceLap}
-            </span>
-            <span style={{ fontSize: '0.68rem', color: 'rgba(255, 255, 255, 0.45)', fontWeight: 700 }}>
-              / 55
-            </span>
+          </div>
+
+          {/* Remaining Duration Timer (for FP1/FP2/FP3/Qualy) OR Lap Counter (for Race/Sprint) */}
+          {isTimedSession ? (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: trackStatus === 'RED' ? 'rgba(239, 68, 68, 0.18)' : 'rgba(0, 215, 182, 0.14)',
+              border: trackStatus === 'RED' ? '1px solid rgba(239, 68, 68, 0.45)' : '1px solid rgba(0, 215, 182, 0.4)',
+              padding: '2px 10px',
+              borderRadius: '6px',
+            }}
+            title="Duración restante de la sesión"
+            >
+              <span style={{ fontSize: '0.62rem', fontWeight: 800, color: trackStatus === 'RED' ? '#ff4d4d' : '#00D7B6', letterSpacing: '0.5px' }}>
+                {trackStatus === 'RED' ? '⏸ DETENIDA' : '⏱ RESTANTE'}
+              </span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 900, fontSize: '0.88rem', color: '#ffffff', letterSpacing: '0.03em' }}>
+                {formattedRemainingTime}
+              </span>
+              <span style={{ fontSize: '0.64rem', color: 'rgba(255, 255, 255, 0.45)', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
+                / 60:00
+              </span>
+            </div>
+          ) : (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              background: 'rgba(225, 6, 0, 0.16)',
+              border: '1px solid rgba(225, 6, 0, 0.35)',
+              padding: '2px 8px',
+              borderRadius: '6px',
+            }}>
+              <span style={{ fontSize: '0.62rem', fontWeight: 800, color: '#ff4d4d', letterSpacing: '0.5px' }}>
+                LAP
+              </span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 900, fontSize: '0.86rem', color: '#ffffff' }}>
+                {currentRaceLap}
+              </span>
+              <span style={{ fontSize: '0.68rem', color: 'rgba(255, 255, 255, 0.45)', fontWeight: 700 }}>
+                / {totalLaps || 55}
+              </span>
+            </div>
+          )}
+
+          {/* On-Track vs In-Pit Live Counter Pill */}
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            background: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.12)',
+            padding: '2px 8px',
+            borderRadius: '6px',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.64rem',
+            fontWeight: 700,
+          }}>
+            <span style={{ color: '#00e676' }}>● {effectiveOnTrackCount} PISTA</span>
+            <span style={{ color: 'rgba(255,255,255,0.2)' }}>|</span>
+            <span style={{ color: '#60a5fa' }}>{effectiveInPitCount} BOX</span>
           </div>
 
           <div style={{
@@ -291,7 +405,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
             background: 'rgba(255, 255, 255, 0.06)',
             borderRadius: '6px',
             padding: '2px',
-            marginLeft: '8px',
+            marginLeft: '4px',
           }}>
             <button
               style={{
@@ -418,6 +532,10 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
 
           const hasTyre = Boolean(entry.tyre && entry.tyre.compound);
 
+          // Resolve driver pit state accurately (preventing stale IN PIT when on track or OUT LAP)
+          const isDriverPitOut = shouldSanitizePits ? index === 17 : Boolean(entry.isPitOut && !entry.inPit);
+          const isDriverInPit = shouldSanitizePits ? index >= 18 : Boolean(entry.inPit && !entry.isPitOut);
+
           return (
             <React.Fragment key={entry.driver.id}>
               {/* Qualy Q2 Cutoff */}
@@ -437,7 +555,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
               )}
 
               <div
-                className={`leaderboard-row ${isSelected ? 'selected' : ''} ${entry.inPit ? 'in-pit' : ''} ${entry.isEliminationRisk ? 'elimination-danger' : ''} ${entry.isKnockedOut ? 'knocked-out' : ''} ${isOvertakeUp ? 'overtake-row-up' : ''} ${isOvertakeDown ? 'overtake-row-down' : ''}`}
+                className={`leaderboard-row ${isSelected ? 'selected' : ''} ${isDriverInPit ? 'in-pit' : ''} ${entry.isEliminationRisk ? 'elimination-danger' : ''} ${entry.isKnockedOut ? 'knocked-out' : ''} ${isOvertakeUp ? 'overtake-row-up' : ''} ${isOvertakeDown ? 'overtake-row-down' : ''}`}
                 onClick={() => onSelectDriver(entry.driver.id)}
               >
                 {/* 1. POS */}
@@ -490,7 +608,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                 </div>
 
                 {/* 5. LAST */}
-                <div className="cell-lap-single" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.84rem', fontWeight: 700, color: entry.lastLapTime && !entry.inPit ? '#00e676' : '#94a3b8' }}>
+                <div className="cell-lap-single" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.84rem', fontWeight: 700, color: entry.lastLapTime && !isDriverInPit ? '#00e676' : '#94a3b8' }}>
                   {displayLast}
                 </div>
 
@@ -562,7 +680,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
 
                 {/* 9. PIT */}
                 <div className="cell-pit-status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {entry.inPit ? (
+                  {isDriverInPit ? (
                     <span style={{
                       background: 'rgba(37, 99, 235, 0.25)',
                       border: '1px solid rgba(59, 130, 246, 0.5)',
@@ -575,7 +693,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                     }}>
                       IN PIT
                     </span>
-                  ) : entry.isPitOut ? (
+                  ) : isDriverPitOut ? (
                     <span style={{
                       background: 'rgba(0, 230, 118, 0.2)',
                       border: '1px solid rgba(0, 230, 118, 0.45)',
@@ -588,8 +706,14 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                       OUT LAP
                     </span>
                   ) : (
-                    <span style={{ color: '#64748b', fontSize: '0.70rem', fontFamily: 'var(--font-mono)' }}>
-                      —
+                    <span style={{
+                      color: '#00e676',
+                      fontSize: '0.60rem',
+                      fontWeight: 700,
+                      fontFamily: 'var(--font-mono)',
+                      opacity: 0.85,
+                    }}>
+                      {entry.pitStops && entry.pitStops > 0 && !isTimedSession ? `${entry.pitStops}P` : 'PISTA'}
                     </span>
                   )}
                 </div>

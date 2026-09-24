@@ -137,6 +137,19 @@ export class F1LiveWebSocketService {
   }
 
   public getSessionStatus(): F1LiveSessionStatus {
+    if (
+      this.clockBaseRemainingSec !== null &&
+      this.clockBaseUtcMs !== null &&
+      this.currentSessionStatus.isExtrapolating !== false &&
+      !this.currentSessionStatus.isStopped
+    ) {
+      const elapsedSec = Math.max(0, (Date.now() - this.clockBaseUtcMs) / 1000);
+      const extrapolated = Math.max(0, Math.round(this.clockBaseRemainingSec - elapsedSec));
+      return {
+        ...this.currentSessionStatus,
+        remainingSec: extrapolated,
+      };
+    }
     return { ...this.currentSessionStatus };
   }
 
@@ -428,12 +441,44 @@ export class F1LiveWebSocketService {
     }
   }
 
+  private sessionEndUtcMs: number | null = null;
+  private clockBaseRemainingSec: number | null = null;
+  private clockBaseUtcMs: number | null = null;
+
   private processSessionInfo(data: any): void {
     if (!data || typeof data !== 'object') return;
+
+    // Parse EndDate + GmtOffset to calculate fallback remaining time
+    if (data.EndDate) {
+      const endDateStr = String(data.EndDate);
+      const gmtOffset = data.GmtOffset ? String(data.GmtOffset).trim() : '';
+      let endIso = endDateStr.endsWith('Z') ? endDateStr : `${endDateStr}Z`;
+      if (!endDateStr.endsWith('Z') && gmtOffset) {
+        const sign = gmtOffset.startsWith('-') ? '-' : '+';
+        const parts = gmtOffset.replace(/^[+-]/, '').split(':');
+        if (parts.length >= 2) {
+          endIso = `${endDateStr}${sign}${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+        }
+      }
+      const parsedEnd = new Date(endIso).getTime();
+      if (!isNaN(parsedEnd)) {
+        this.sessionEndUtcMs = parsedEnd;
+      }
+    }
+
+    let fallbackRemainingSec = this.currentSessionStatus.remainingSec;
+    if (this.sessionEndUtcMs && (fallbackRemainingSec === undefined || fallbackRemainingSec <= 0)) {
+      const diffSec = Math.floor((this.sessionEndUtcMs - Date.now()) / 1000);
+      if (diffSec > 0 && diffSec <= 4 * 3600) {
+        fallbackRemainingSec = diffSec;
+      }
+    }
+
     this.currentSessionStatus = {
       ...this.currentSessionStatus,
       sessionName: data.Name || this.currentSessionStatus.sessionName,
       sessionType: data.Type || this.currentSessionStatus.sessionType,
+      remainingSec: fallbackRemainingSec,
     };
     this.notifySessionStatus();
   }
@@ -457,7 +502,7 @@ export class F1LiveWebSocketService {
     }
 
     if (status) {
-      const isFinished = status === 'Finished' || this.currentSessionStatus.remaining === '00:00:00';
+      const isFinished = status === 'Finished';
       this.currentSessionStatus = {
         ...this.currentSessionStatus,
         sessionStatus: status,
@@ -477,16 +522,39 @@ export class F1LiveWebSocketService {
     if (!data || typeof data !== 'object') return;
     const remainingStr = data.Remaining;
     const isExtrapolating = data.Extrapolating !== false;
-    let remainingSec = 0;
+    let baseRemainingSec = 0;
     if (remainingStr && typeof remainingStr === 'string') {
       const parts = remainingStr.split(':').map(Number);
       if (parts.length === 3) {
-        remainingSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
+        baseRemainingSec = parts[0] * 3600 + parts[1] * 60 + parts[2];
       } else if (parts.length === 2) {
-        remainingSec = parts[0] * 60 + parts[1];
+        baseRemainingSec = parts[0] * 60 + parts[1];
       }
     }
-    const isFinished = remainingStr === '00:00:00' || this.currentSessionStatus.sessionStatus === 'Finished';
+
+    let remainingSec = baseRemainingSec;
+    if (isExtrapolating && data.Utc) {
+      const clockUtcMs = new Date(data.Utc).getTime();
+      if (!isNaN(clockUtcMs)) {
+        const elapsedSec = Math.max(0, (Date.now() - clockUtcMs) / 1000);
+        remainingSec = Math.max(0, Math.round(baseRemainingSec - elapsedSec));
+        this.clockBaseRemainingSec = baseRemainingSec;
+        this.clockBaseUtcMs = clockUtcMs;
+      }
+    } else {
+      this.clockBaseRemainingSec = baseRemainingSec;
+      this.clockBaseUtcMs = Date.now();
+    }
+
+    // Fallback to SessionInfo EndDate if clock is 0 but session is Started and within window
+    if (remainingSec <= 0 && this.currentSessionStatus.sessionStatus === 'Started' && this.sessionEndUtcMs) {
+      const diffSec = Math.floor((this.sessionEndUtcMs - Date.now()) / 1000);
+      if (diffSec > 0 && diffSec <= 4 * 3600) {
+        remainingSec = diffSec;
+      }
+    }
+
+    const isFinished = this.currentSessionStatus.sessionStatus === 'Finished' || (remainingStr === '00:00:00' && remainingSec <= 0 && this.currentSessionStatus.sessionStatus !== 'Started');
     const isRedFlag = this.currentSessionStatus.trackStatus === '5';
     const isStopped = !isExtrapolating || isRedFlag;
     this.currentSessionStatus = {
@@ -652,6 +720,21 @@ export class F1LiveWebSocketService {
   private mergeTimingLine(existing: RawF1TimingLine, delta: RawF1TimingLine): RawF1TimingLine {
     const res: RawF1TimingLine = { ...existing, ...delta };
 
+    // Explicitly synchronize mutually exclusive Pit states when delta arrives
+    if (delta.PitOut === true) {
+      res.InPit = false;
+      res.PitOut = true;
+    } else if (delta.InPit === true) {
+      res.InPit = true;
+      res.PitOut = false;
+    } else if (delta.InPit === false) {
+      res.InPit = false;
+    }
+
+    let hasActiveOnTrackSector = false;
+    let hasCompletedSector1OrLater = false;
+    let hasPitSegment = false;
+
     // Deep merge Sectors
     if (delta.Sectors) {
       const existingSectors = Array.isArray(existing.Sectors)
@@ -667,6 +750,13 @@ export class F1LiveWebSocketService {
         if (!deltaSec) continue;
         const curSec = existingSectors[idx] || {};
         const mergedSec = { ...curSec, ...deltaSec };
+
+        if (deltaSec.Value && String(deltaSec.Value).trim() !== '') {
+          hasActiveOnTrackSector = true;
+          if (idx >= 0) {
+            hasCompletedSector1OrLater = true;
+          }
+        }
 
         // Deep merge Segments
         if (deltaSec.Segments) {
@@ -685,6 +775,21 @@ export class F1LiveWebSocketService {
             }
             mergedSec.Segments = curSegs;
           }
+
+          const deltaSegValues = Array.isArray(deltaSec.Segments)
+            ? deltaSec.Segments
+            : Object.values(deltaSec.Segments);
+          for (const seg of deltaSegValues) {
+            const st = seg && typeof seg === 'object' ? seg.Status : seg;
+            if (st === 2048 || st === 2049 || st === 2051) {
+              hasActiveOnTrackSector = true;
+              if (idx >= 1) {
+                hasCompletedSector1OrLater = true;
+              }
+            } else if (st === 2064) {
+              hasPitSegment = true;
+            }
+          }
         }
         existingSectors[idx] = mergedSec;
       }
@@ -693,12 +798,31 @@ export class F1LiveWebSocketService {
 
     if (delta.BestLapTime) {
       res.BestLapTime = { ...(existing.BestLapTime || {}), ...delta.BestLapTime };
+      if (delta.BestLapTime.Value) {
+        hasActiveOnTrackSector = true;
+        hasCompletedSector1OrLater = true;
+      }
     }
     if (delta.LastLapTime) {
       res.LastLapTime = { ...(existing.LastLapTime || {}), ...delta.LastLapTime };
+      if (delta.LastLapTime.Value) {
+        hasActiveOnTrackSector = true;
+        hasCompletedSector1OrLater = true;
+      }
     }
     if (delta.IntervalToPositionAhead) {
       res.IntervalToPositionAhead = { ...(existing.IntervalToPositionAhead || {}), ...delta.IntervalToPositionAhead };
+    }
+
+    // Clear stale InPit / PitOut when car is actively setting on-track sectors/laps
+    if (hasActiveOnTrackSector && !hasPitSegment && delta.InPit !== true) {
+      res.InPit = false;
+      if (hasCompletedSector1OrLater && delta.PitOut !== true) {
+        res.PitOut = false;
+      }
+    } else if (hasPitSegment && delta.PitOut !== true && delta.InPit !== false) {
+      res.InPit = true;
+      res.PitOut = false;
     }
 
     return res;
@@ -739,13 +863,40 @@ export class F1LiveWebSocketService {
       const s2Time = s2?.Value || '';
       const s3Time = s3?.Value || '';
 
-      const s1Status = this.resolveSectorStatus(s1, line.InPit);
-      const s2Status = this.resolveSectorStatus(s2, line.InPit);
-      const s3Status = this.resolveSectorStatus(s3, line.InPit);
+      // Resolve accurate pit state combining line flags, microsectors, and live telemetry speed
+      let resolvedInPit = Boolean(line.InPit);
+      let resolvedPitOut = Boolean(line.PitOut);
+
+      if (resolvedPitOut) {
+        resolvedInPit = false;
+      }
+
+      const liveCar = this.currentCarData.get(driverNum);
+      if (liveCar && liveCar.speed > 85) {
+        // Pit lane speed limit is 80 km/h — car > 85 km/h is definitely on track
+        resolvedInPit = false;
+        if (liveCar.speed > 175 && (s1Time || s2Time)) {
+          resolvedPitOut = false;
+        }
+      }
+
+      const s1Status = this.resolveSectorStatus(s1, resolvedInPit);
+      const s2Status = this.resolveSectorStatus(s2, resolvedInPit);
+      const s3Status = this.resolveSectorStatus(s3, resolvedInPit);
 
       const s1Segments = this.resolveSegments(s1?.Segments, s1Status);
       const s2Segments = this.resolveSegments(s2?.Segments, s2Status);
       const s3Segments = this.resolveSegments(s3?.Segments, s3Status);
+
+      // Check latest microsector across all sectors
+      const allActiveSegs = [...s1Segments, ...s2Segments, ...s3Segments].filter(s => s !== 'none');
+      const lastActiveSeg = allActiveSegs.length > 0 ? allActiveSegs[allActiveSegs.length - 1] : null;
+      if (lastActiveSeg && lastActiveSeg !== 'pit' && (s1Time || s2Time || s3Time)) {
+        resolvedInPit = false;
+        if (s2Segments.some(s => s !== 'none' && s !== 'pit') || s3Segments.some(s => s !== 'none' && s !== 'pit')) {
+          resolvedPitOut = false;
+        }
+      }
 
       // Gaps
       const gapToLeader = line.GapToLeader || line.TimeDiffToFastest || '';
@@ -788,9 +939,9 @@ export class F1LiveWebSocketService {
           age: tyreAge,
           used: tyreUsed,
         },
-        pitStops: line.NumberOfPitStops || 0,
-        inPit: Boolean(line.InPit),
-        isPitOut: Boolean(line.PitOut),
+        pitStops: line.NumberOfPitStops !== undefined ? line.NumberOfPitStops : (existingEntry?.pitStops || 0),
+        inPit: resolvedInPit,
+        isPitOut: resolvedPitOut,
         speedTrap: parseFloat(line.Speeds?.ST?.Value || '0') || (existingEntry?.speedTrap || 315),
         lastLapTimeNum: this.parseLapTimeToSeconds(lastLap || bestLap),
         trackProgress: existingEntry ? existingEntry.trackProgress : (1 - (pos - 1) * 0.045 + 1) % 1,
@@ -893,6 +1044,15 @@ export class F1LiveWebSocketService {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
+          const inPitCount = parsed.filter((e: any) => e && e.inPit).length;
+          if (inPitCount > 8) {
+            parsed.forEach((e: any, idx: number) => {
+              if (e) {
+                e.inPit = idx >= 18;
+                e.isPitOut = false;
+              }
+            });
+          }
           return parsed;
         }
       }
