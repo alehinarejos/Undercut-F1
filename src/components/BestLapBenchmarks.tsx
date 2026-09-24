@@ -63,14 +63,23 @@ export const BestLapBenchmarks: React.FC<BestLapBenchmarksProps> = ({
     : 'C. Leclerc (2019)';
 
   // Weekend fastest lap benchmark for the GP currently being raced (persisted across sessions of this GP)
-  const storageKey = `f1_weekend_fastest_${activeCircuitId}`;
+  const storageKey = `f1_weekend_fastest_v2_${activeCircuitId}`;
+  const isFirstSessionOfWeekend = /fp1|practice 1|libres 1/i.test(sessionName);
+  // Minimum realistic lap time for this circuit (e.g. circuit record minus 3.5s) to reject stale laps from shorter circuits
+  const minRealisticCircuitSec = Number.isFinite(circuitRecordSec) ? circuitRecordSec - 3.5 : 98;
+
   let savedWeekendBest: { sec: number; driverCode: string; sessionLabel: string } | null = null;
-  if (typeof window !== 'undefined') {
+  if (typeof window !== 'undefined' && !isFirstSessionOfWeekend) {
     try {
       const raw = localStorage.getItem(storageKey);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed.sec === 'number' && parsed.sec > 40 && parsed.sec < 200) {
+        if (
+          parsed &&
+          typeof parsed.sec === 'number' &&
+          parsed.sec >= minRealisticCircuitSec &&
+          parsed.sec < 200
+        ) {
           savedWeekendBest = parsed;
         }
       }
@@ -81,8 +90,8 @@ export const BestLapBenchmarks: React.FC<BestLapBenchmarksProps> = ({
     ? sessionName.split(' - ').slice(-1)[0]
     : sessionName;
 
-  if (minSec !== Infinity && sessionBestEntry) {
-    if (!savedWeekendBest || minSec <= savedWeekendBest.sec) {
+  if (minSec !== Infinity && sessionBestEntry && minSec >= minRealisticCircuitSec) {
+    if (!savedWeekendBest || minSec <= savedWeekendBest.sec || isFirstSessionOfWeekend) {
       savedWeekendBest = {
         sec: minSec,
         driverCode: sessionBestEntry.driver.code,
@@ -96,7 +105,7 @@ export const BestLapBenchmarks: React.FC<BestLapBenchmarksProps> = ({
     }
   }
 
-  const fallbackWeekendSec = Number.isFinite(circuitRecordSec) ? Math.max(60, circuitRecordSec - 0.420) : 102.589;
+  const fallbackWeekendSec = Number.isFinite(circuitRecordSec) ? Math.max(60, circuitRecordSec - 0.420) : 102.340;
   const weekendFastestSec = savedWeekendBest ? savedWeekendBest.sec : (minSec !== Infinity ? minSec : fallbackWeekendSec);
   const weekendDriverInfo = savedWeekendBest
     ? `${savedWeekendBest.driverCode} (${savedWeekendBest.sessionLabel})`
