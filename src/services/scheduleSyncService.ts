@@ -434,9 +434,9 @@ export function getGrandPrixTimeline(gp: GrandPrixEvent): GrandPrixTimeline {
     const endTime = !isNaN(explicitEnd) ? explicitEnd : (!isNaN(startTime) ? startTime + durationMs : NaN);
 
     let status: SessionStateKind = 'future';
-    if (sess.completed) {
-      status = 'completed';
-    } else if (!isNaN(startTime) && !isNaN(endTime)) {
+    // A session is only truly 'completed' if its end time has genuinely passed,
+    // regardless of any runtime-set completed flag (which may be stale WebSocket data).
+    if (!isNaN(startTime) && !isNaN(endTime)) {
       if (now >= startTime && now < endTime) {
         status = 'live';
       } else if (now >= endTime) {
@@ -444,6 +444,8 @@ export function getGrandPrixTimeline(gp: GrandPrixEvent): GrandPrixTimeline {
       } else {
         status = 'future';
       }
+    } else if (sess.completed) {
+      status = 'completed';
     }
 
     const { dateStr, timeStr } = formatSessionFull(sess);

@@ -159,33 +159,38 @@ export const App: React.FC = () => {
   const getCurrentScheduledSession = () => {
     const wsStatus = f1LiveWebSocketService.getSessionStatus();
     const now = new Date();
+    const nowMs = now.getTime();
     const liveSchedule = scheduleSyncService.getState().schedule || F1_SCHEDULE;
     for (const gp of liveSchedule) {
       for (const sess of gp.sessions) {
-        if (sess.completed) continue;
         const start = new Date(sess.startTimeUtc);
         const durMin = sess.type === 'Race' ? 120 : sess.type === 'Sprint' ? 45 : 60;
         const end = sess.endTimeUtc
           ? new Date(sess.endTimeUtc)
           : new Date(start.getTime() + durMin * 60 * 1000);
-        if (now >= start && now < end) {
-          // Only treat as finished if wsStatus.isFinished is for THIS same session
-          const wsName = (wsStatus.sessionName || '').toLowerCase();
-          const schedName = (sess.name || '').toLowerCase();
-          const schedType = (sess.type || '').toLowerCase();
-          const isSameWsSession = Boolean(
-            wsName && (schedName.includes(wsName) || wsName.includes(schedType) || (wsName.includes('practice 1') && schedType === 'fp1') || (wsName.includes('practice 2') && schedType === 'fp2') || (wsName.includes('practice 3') && schedType === 'fp3'))
-          );
-          if (isSameWsSession && (wsStatus.isFinished || wsStatus.isChequered)) {
-            return null;
-          }
 
-          const scheduleRemainingSec = Math.max(0, (end.getTime() - now.getTime()) / 1000);
-          const remainingSec = (isSameWsSession && wsStatus.remainingSec !== undefined && wsStatus.remainingSec > 0)
-            ? wsStatus.remainingSec
-            : scheduleRemainingSec;
-          return { gp, sess, start, end, durSec: durMin * 60, remainingSec };
+        // Skip sessions that haven't started or are genuinely past their end time
+        if (nowMs < start.getTime() || nowMs >= end.getTime()) continue;
+
+        // At this point the current time is inside the session's UTC window.
+        // Ignore the 'completed' flag — it may have been set erroneously by stale WebSocket data.
+
+        // Only treat as finished if wsStatus.isFinished is for THIS same session
+        const wsName = (wsStatus.sessionName || '').toLowerCase();
+        const schedName = (sess.name || '').toLowerCase();
+        const schedType = (sess.type || '').toLowerCase();
+        const isSameWsSession = Boolean(
+          wsName && (schedName.includes(wsName) || wsName.includes(schedType) || (wsName.includes('practice 1') && schedType === 'fp1') || (wsName.includes('practice 2') && schedType === 'fp2') || (wsName.includes('practice 3') && schedType === 'fp3'))
+        );
+        if (isSameWsSession && (wsStatus.isFinished || wsStatus.isChequered)) {
+          return null;
         }
+
+        const scheduleRemainingSec = Math.max(0, (end.getTime() - nowMs) / 1000);
+        const remainingSec = (isSameWsSession && wsStatus.remainingSec !== undefined && wsStatus.remainingSec > 0)
+          ? wsStatus.remainingSec
+          : scheduleRemainingSec;
+        return { gp, sess, start, end, durSec: durMin * 60, remainingSec };
       }
     }
     return null;
