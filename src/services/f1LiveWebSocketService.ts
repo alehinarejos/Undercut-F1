@@ -15,7 +15,8 @@ export interface LiveCarTelemetry {
   drs?: number;
 }
 
-export const STORAGE_LIVE_LEADERBOARD_KEY = 'f1_live_leaderboard';
+export const STORAGE_LIVE_LEADERBOARD_KEY = 'f1_official_latest_session_v4';
+export const STORAGE_SESSION_BEST_SECTORS_KEY = 'f1_session_best_sectors_v4';
 
 export interface RawF1TimingLine {
   Position?: string;
@@ -123,6 +124,7 @@ export class F1LiveWebSocketService {
   private cachedTimingLines: Map<string, RawF1TimingLine> = new Map();
   private cachedDrivers: Map<string, RawF1DriverItem> = new Map();
   private cachedStints: Map<string, RawF1StintItem[]> = new Map();
+  private cachedBestSectors: Map<string, { s1?: string; s2?: string; s3?: string; bestLap?: string }> = new Map();
   private currentLeaderboard: LeaderboardEntry[] = [];
   private currentCarData: Map<number, LiveCarTelemetry> = new Map();
   private lastEmitTime = 0;
@@ -134,6 +136,7 @@ export class F1LiveWebSocketService {
   };
 
   constructor() {
+    this.loadBestSectorsFromStorage();
     this.currentLeaderboard = this.loadFromStorage();
   }
 
@@ -318,6 +321,10 @@ export class F1LiveWebSocketService {
       if (msg.R.TimingAppData) {
         this.processTimingAppData(msg.R.TimingAppData);
       }
+      if (msg.R.TimingStats) {
+        this.processTimingStats(msg.R.TimingStats);
+        hasTimingUpdate = true;
+      }
       if (msg.R.TimingData) {
         this.processTimingData(msg.R.TimingData);
         hasTimingUpdate = true;
@@ -335,6 +342,9 @@ export class F1LiveWebSocketService {
         const data = item.A[1];
         if (topic === 'TimingData') {
           this.processTimingData(data);
+          hasTimingUpdate = true;
+        } else if (topic === 'TimingStats') {
+          this.processTimingStats(data);
           hasTimingUpdate = true;
         } else if (topic === 'TimingAppData') {
           this.processTimingAppData(data);
@@ -908,8 +918,64 @@ export class F1LiveWebSocketService {
     this.buildAndEmitLeaderboard();
   }
 
+  private processTimingStats(data: any): void {
+    if (!data || !data.Lines || typeof data.Lines !== 'object') return;
+    let changed = false;
+    for (const [numStr, rawLine] of Object.entries(data.Lines)) {
+      const line = rawLine as any;
+      if (!line || typeof line !== 'object') continue;
+      const bestSectors = Array.isArray(line.BestSectors)
+        ? line.BestSectors
+        : line.BestSectors && typeof line.BestSectors === 'object'
+        ? [line.BestSectors['0'], line.BestSectors['1'], line.BestSectors['2']]
+        : [];
+      const bs1 = bestSectors[0]?.Value;
+      const bs2 = bestSectors[1]?.Value;
+      const bs3 = bestSectors[2]?.Value;
+      const pbLap = line.PersonalBestLapTime?.Value;
+      if (this.updateBestSectorRecord(numStr, bs1, bs2, bs3, pbLap)) {
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.saveBestSectorsToStorage();
+    }
+  }
+
+  private pickFasterTimeString(a?: string, b?: string): string | undefined {
+    const cleanA = a && !a.includes('-') && a.trim() !== '' ? a.trim() : undefined;
+    const cleanB = b && !b.includes('-') && b.trim() !== '' ? b.trim() : undefined;
+    if (!cleanA) return cleanB;
+    if (!cleanB) return cleanA;
+    const secA = this.parseLapTimeToSeconds(cleanA);
+    const secB = this.parseLapTimeToSeconds(cleanB);
+    if (secA > 0 && (secB <= 0 || secA <= secB)) return cleanA;
+    if (secB > 0) return cleanB;
+    return cleanA;
+  }
+
+  private updateBestSectorRecord(numStr: string, s1?: string, s2?: string, s3?: string, bestLap?: string): boolean {
+    const prev = this.cachedBestSectors.get(numStr) || {};
+    const nextS1 = this.pickFasterTimeString(prev.s1, s1);
+    const nextS2 = this.pickFasterTimeString(prev.s2, s2);
+    const nextS3 = this.pickFasterTimeString(prev.s3, s3);
+    const nextLap = this.pickFasterTimeString(prev.bestLap, bestLap);
+
+    if (nextS1 !== prev.s1 || nextS2 !== prev.s2 || nextS3 !== prev.s3 || nextLap !== prev.bestLap) {
+      this.cachedBestSectors.set(numStr, {
+        s1: nextS1,
+        s2: nextS2,
+        s3: nextS3,
+        bestLap: nextLap,
+      });
+      return true;
+    }
+    return false;
+  }
+
   private buildAndEmitLeaderboard(): void {
     const entries: LeaderboardEntry[] = [];
+    let bestSectorsChanged = false;
 
     // Map cached entries
     const hasHadjarLine = this.cachedTimingLines.has('6');
@@ -926,9 +992,8 @@ export class F1LiveWebSocketService {
 
       const pos = parseInt(line.Position || '99', 10);
 
-      // Best lap & last lap
-      const bestLap = line.BestLapTime?.Value || '';
-      const lastLap = line.LastLapTime?.Value || '';
+      // Existing entry for trackProgress & best sector preservation
+      const existingEntry = this.currentLeaderboard.find(e => e.driver.number === driverNum || e.driver.id === driver.id);
 
       // Sectors
       const sectors = Array.isArray(line.Sectors) ? line.Sectors : line.Sectors ? Object.values(line.Sectors) : [];
@@ -936,9 +1001,33 @@ export class F1LiveWebSocketService {
       const s2 = sectors[1];
       const s3 = sectors[2];
 
-      const s1Time = s1?.Value || '';
-      const s2Time = s2?.Value || '';
-      const s3Time = s3?.Value || '';
+      const rawS1 = s1?.Value || s1?.PreviousValue || '';
+      const rawS2 = s2?.Value || s2?.PreviousValue || '';
+      const rawS3 = s3?.Value || s3?.PreviousValue || '';
+      const rawBestLap = line.BestLapTime?.Value || existingEntry?.bestLapTime || '';
+
+      if (this.updateBestSectorRecord(
+        numStr,
+        this.pickFasterTimeString(rawS1, existingEntry?.s1BestTime),
+        this.pickFasterTimeString(rawS2, existingEntry?.s2BestTime),
+        this.pickFasterTimeString(rawS3, existingEntry?.s3BestTime),
+        rawBestLap
+      )) {
+        bestSectorsChanged = true;
+      }
+
+      const bestRecord = this.cachedBestSectors.get(numStr);
+      const s1BestTime = bestRecord?.s1 || existingEntry?.s1BestTime || rawS1 || '';
+      const s2BestTime = bestRecord?.s2 || existingEntry?.s2BestTime || rawS2 || '';
+      const s3BestTime = bestRecord?.s3 || existingEntry?.s3BestTime || rawS3 || '';
+
+      // Best lap & last lap
+      const bestLap = bestRecord?.bestLap || line.BestLapTime?.Value || existingEntry?.bestLapTime || '';
+      const lastLap = line.LastLapTime?.Value || existingEntry?.lastLapTime || bestLap || '';
+
+      const s1Time = rawS1 || s1BestTime || '';
+      const s2Time = rawS2 || s2BestTime || '';
+      const s3Time = rawS3 || s3BestTime || '';
 
       // Resolve accurate pit state combining line flags, microsectors, and live telemetry speed
       let resolvedInPit = Boolean(line.InPit);
@@ -961,14 +1050,14 @@ export class F1LiveWebSocketService {
       const s2Status = this.resolveSectorStatus(s2, resolvedInPit);
       const s3Status = this.resolveSectorStatus(s3, resolvedInPit);
 
-      const s1Segments = this.resolveSegments(s1?.Segments, s1Status, 8, Boolean(s1Time));
-      const s2Segments = this.resolveSegments(s2?.Segments, s2Status, 8, Boolean(s2Time));
-      const s3Segments = this.resolveSegments(s3?.Segments, s3Status, 9, Boolean(s3Time));
+      const s1Segments = this.resolveSegments(s1?.Segments, s1Status, 8, Boolean(rawS1));
+      const s2Segments = this.resolveSegments(s2?.Segments, s2Status, 8, Boolean(rawS2));
+      const s3Segments = this.resolveSegments(s3?.Segments, s3Status, 9, Boolean(rawS3));
 
       // Check latest microsector across all sectors
       const allActiveSegs = [...s1Segments, ...s2Segments, ...s3Segments].filter(s => s !== 'none');
       const lastActiveSeg = allActiveSegs.length > 0 ? allActiveSegs[allActiveSegs.length - 1] : null;
-      if (lastActiveSeg && lastActiveSeg !== 'pit' && (s1Time || s2Time || s3Time)) {
+      if (lastActiveSeg && lastActiveSeg !== 'pit' && (rawS1 || rawS2 || rawS3)) {
         resolvedInPit = false;
         if (s2Segments.some(s => s !== 'none' && s !== 'pit') || s3Segments.some(s => s !== 'none' && s !== 'pit')) {
           resolvedPitOut = false;
@@ -978,9 +1067,6 @@ export class F1LiveWebSocketService {
       // Gaps
       const gapToLeader = line.GapToLeader || line.TimeDiffToFastest || '';
       const gapToAhead = line.IntervalToPositionAhead?.Value || line.TimeDiffToPositionAhead || line.TimeDiffToFastest || '';
-
-      // Existing entry for trackProgress preservation
-      const existingEntry = this.currentLeaderboard.find(e => e.driver.number === driverNum || e.driver.id === driver.id);
 
       // Compound & Tyres
       const rawComp = (currentStint?.Compound || (line as any).StintCompound || '').toUpperCase();
@@ -1005,6 +1091,9 @@ export class F1LiveWebSocketService {
         s1Time,
         s2Time,
         s3Time,
+        s1BestTime,
+        s2BestTime,
+        s3BestTime,
         s1Status,
         s2Status,
         s3Status,
@@ -1024,6 +1113,10 @@ export class F1LiveWebSocketService {
         trackProgress: existingEntry ? existingEntry.trackProgress : (1 - (pos - 1) * 0.045 + 1) % 1,
         lapsCompleted: line.NumberOfLaps !== undefined ? line.NumberOfLaps : existingEntry?.lapsCompleted,
       });
+    }
+
+    if (bestSectorsChanged) {
+      this.saveBestSectorsToStorage();
     }
 
     if (entries.length === 0) return;
@@ -1134,12 +1227,42 @@ export class F1LiveWebSocketService {
     return parseFloat(clean) || 0;
   }
 
+  private loadBestSectorsFromStorage(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      const raw = localStorage.getItem(STORAGE_SESSION_BEST_SECTORS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object') {
+          for (const [k, val] of Object.entries(parsed)) {
+            if (val && typeof val === 'object') {
+              this.cachedBestSectors.set(k, val as any);
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  private saveBestSectorsToStorage(): void {
+    if (typeof window === 'undefined') return;
+    try {
+      const obj: Record<string, any> = {};
+      for (const [k, val] of this.cachedBestSectors.entries()) {
+        obj[k] = val;
+      }
+      localStorage.setItem(STORAGE_SESSION_BEST_SECTORS_KEY, JSON.stringify(obj));
+    } catch {
+      // ignore
+    }
+  }
+
   public loadFromStorage(): LeaderboardEntry[] {
     if (typeof window === 'undefined') return [];
     try {
-      const raw = localStorage.getItem(STORAGE_LIVE_LEADERBOARD_KEY) ||
-                  localStorage.getItem('f1_saved_leaderboard_madrid') ||
-                  localStorage.getItem('f1_official_live_timing_cache');
+      const raw = localStorage.getItem(STORAGE_LIVE_LEADERBOARD_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
@@ -1168,8 +1291,25 @@ export class F1LiveWebSocketService {
               }
               continue;
             }
-            cleaned.push(e);
+            const numStr = String(e.driver.number);
+            const bestRecord = this.cachedBestSectors.get(numStr);
+            const s1Best = this.pickFasterTimeString(bestRecord?.s1, this.pickFasterTimeString(e.s1BestTime, e.s1Time));
+            const s2Best = this.pickFasterTimeString(bestRecord?.s2, this.pickFasterTimeString(e.s2BestTime, e.s2Time));
+            const s3Best = this.pickFasterTimeString(bestRecord?.s3, this.pickFasterTimeString(e.s3BestTime, e.s3Time));
+            if (s1Best || s2Best || s3Best) {
+              this.updateBestSectorRecord(numStr, s1Best, s2Best, s3Best, e.bestLapTime);
+            }
+            cleaned.push({
+              ...e,
+              s1BestTime: s1Best || e.s1BestTime || e.s1Time,
+              s2BestTime: s2Best || e.s2BestTime || e.s2Time,
+              s3BestTime: s3Best || e.s3BestTime || e.s3Time,
+              s1Time: e.s1Time || s1Best || '',
+              s2Time: e.s2Time || s2Best || '',
+              s3Time: e.s3Time || s3Best || '',
+            });
           }
+          this.saveBestSectorsToStorage();
           const inPitCount = cleaned.filter((e: any) => e && e.inPit).length;
           if (inPitCount > 8) {
             modified = true;
@@ -1198,8 +1338,6 @@ export class F1LiveWebSocketService {
     try {
       const json = JSON.stringify(entries);
       localStorage.setItem(STORAGE_LIVE_LEADERBOARD_KEY, json);
-      localStorage.setItem('f1_saved_leaderboard_madrid', json);
-      localStorage.setItem('f1_official_live_timing_cache', json);
     } catch (e) {
       console.warn('[F1LiveWS] Failed writing localStorage:', e);
     }

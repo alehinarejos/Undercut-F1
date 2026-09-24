@@ -94,40 +94,7 @@ export const App: React.FC = () => {
   useEffect(() => {
     updateSeoMetadata(activeTab, language);
   }, [activeTab, language]);
-  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const raw = localStorage.getItem('f1_live_leaderboard') ||
-                    localStorage.getItem('f1_saved_leaderboard_madrid') ||
-                    localStorage.getItem('f1_official_live_timing_cache');
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            const inPitCount = parsed.filter((e: any) => e && e.inPit).length;
-            parsed.forEach((entry: any, i: number) => {
-              const age = i === 0 ? 18 : i === 1 ? 18 : i === 2 ? 8 : ((i * 2 + 3) % 15) + 4;
-              if (!entry.tyre || entry.tyre.age === 0) {
-                entry.tyre = {
-                  compound: i === 2 || i === 6 ? 'MEDIUM' : i === 7 ? 'HARD' : 'SOFT',
-                  age,
-                  used: age > 1,
-                };
-              }
-              if (!entry.lapsCompleted || entry.lapsCompleted < 10) {
-                entry.lapsCompleted = i >= 17 ? 17 : 18;
-              }
-              if (inPitCount > 8) {
-                entry.inPit = i >= 18;
-                entry.isPitOut = i === 17;
-              }
-            });
-            return parsed;
-          }
-        }
-      } catch {}
-    }
-    return engine.getLeaderboard();
-  });
+  const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>(() => engine.getLeaderboard());
   const [session, setSession] = useState<SessionState>(() => {
     const base = engine.getSession();
     if (typeof window !== 'undefined') {
@@ -240,26 +207,17 @@ export const App: React.FC = () => {
     }
   };
 
-  // On mount: find the most recently completed session from the schedule and load its real data
+  // On mount: find the most recently completed or active session and load its real data
   useEffect(() => {
     const loadLastSession = async () => {
       try {
-        const madridSessions = await officialF1Api.getMeetingSessions(1294);
-        if (madridSessions && madridSessions.length > 0) {
-          const nowMs = Date.now();
-          let latestCompletedKey: number | null = null;
-          for (const s of madridSessions) {
-            const endMs = new Date(s.date_end).getTime();
-            if (endMs < nowMs && (!latestCompletedKey || s.session_key > latestCompletedKey)) {
-              latestCompletedKey = s.session_key;
-            }
-          }
-          if (latestCompletedKey) {
-            await loadRealSessionData(latestCompletedKey, 1294);
-          }
+        const latest = await officialF1Api.checkLiveStatus();
+        const targetSession = latest.activeSession || latest.latestCompletedSession;
+        if (targetSession?.session_key) {
+          await loadRealSessionData(targetSession.session_key, targetSession.meeting_key);
         }
       } catch (e) {
-        console.warn('[OpenF1] Could not load Madrid sessions:', e);
+        console.warn('[OpenF1] Could not load latest session:', e);
       }
     };
 

@@ -318,11 +318,11 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
     if (s < minSessionBestSec) {
       minSessionBestSec = s;
     }
-    const s1 = parseLapTimeToSec(e.s1BestTime || e.s1Time);
+    const s1 = Math.min(parseLapTimeToSec(e.s1BestTime), parseLapTimeToSec(e.s1Time));
     if (s1 < minS1Sec) minS1Sec = s1;
-    const s2 = parseLapTimeToSec(e.s2BestTime || e.s2Time);
+    const s2 = Math.min(parseLapTimeToSec(e.s2BestTime), parseLapTimeToSec(e.s2Time));
     if (s2 < minS2Sec) minS2Sec = s2;
-    const s3 = parseLapTimeToSec(e.s3BestTime || e.s3Time);
+    const s3 = Math.min(parseLapTimeToSec(e.s3BestTime), parseLapTimeToSec(e.s3Time));
     if (s3 < minS3Sec) minS3Sec = s3;
   }
 
@@ -562,10 +562,17 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
           const isOvertakeUp = ot?.dir === 'up' && (Date.now() - ot.timestamp < 3800);
           const isOvertakeDown = ot?.dir === 'down' && (Date.now() - ot.timestamp < 3800);
 
-          // Sector best calculations
-          const s1Best = entry.s1BestTime && entry.s1BestTime !== '--.---' ? entry.s1BestTime : entry.s1Time;
-          const s2Best = entry.s2BestTime && entry.s2BestTime !== '--.---' ? entry.s2BestTime : entry.s2Time;
-          const s3Best = entry.s3BestTime && entry.s3BestTime !== '--.---' ? entry.s3BestTime : entry.s3Time;
+          // Sector best calculations (always pick the faster of sBestTime and sTime)
+          const pickFasterSector = (best?: string, current?: string) => {
+            const bSec = parseLapTimeToSec(best);
+            const cSec = parseLapTimeToSec(current);
+            if (bSec <= cSec && bSec !== Infinity) return best;
+            if (cSec !== Infinity) return current;
+            return best || current;
+          };
+          const s1Best = pickFasterSector(entry.s1BestTime, entry.s1Time);
+          const s2Best = pickFasterSector(entry.s2BestTime, entry.s2Time);
+          const s3Best = pickFasterSector(entry.s3BestTime, entry.s3Time);
 
           const s1BestSec = parseLapTimeToSec(s1Best);
           const s2BestSec = parseLapTimeToSec(s2Best);
@@ -707,7 +714,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                   flex: 1,
                 }}>
                   <MiniSectorGroup
-                    lastTime={entry.s1Time}
+                    lastTime={entry.s1Time || s1Best}
                     bestTime={s1Best}
                     status={entry.s1Status}
                     bestStatus={s1BestStatus}
@@ -715,7 +722,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                     count={8}
                   />
                   <MiniSectorGroup
-                    lastTime={entry.s2Time}
+                    lastTime={entry.s2Time || s2Best}
                     bestTime={s2Best}
                     status={entry.s2Status}
                     bestStatus={s2BestStatus}
@@ -723,7 +730,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                     count={8}
                   />
                   <MiniSectorGroup
-                    lastTime={entry.s3Time}
+                    lastTime={entry.s3Time || s3Best}
                     bestTime={s3Best}
                     status={entry.s3Status}
                     bestStatus={s3BestStatus}

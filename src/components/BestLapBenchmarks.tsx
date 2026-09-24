@@ -1,7 +1,9 @@
 import React from 'react';
-import { Timer, HelpCircle, TrendingUp, TrendingDown, Zap, Trophy, Award } from 'lucide-react';
+import { Timer, TrendingUp, TrendingDown, Zap, Trophy, Award } from 'lucide-react';
 import { TeamLogo } from './TeamLogo';
 import type { LeaderboardEntry, CircuitInfo } from '../types/telemetry';
+import { CIRCUIT_MAP } from '../data/circuits';
+import { scheduleSyncService, getNextUpcomingGrandPrix } from '../services/scheduleSyncService';
 
 interface BestLapBenchmarksProps {
   entries: LeaderboardEntry[];
@@ -12,10 +14,16 @@ interface BestLapBenchmarksProps {
 
 export const BestLapBenchmarks: React.FC<BestLapBenchmarksProps> = ({
   entries,
-  sessionName = 'Practice 3',
-  circuitName: _circuitName = 'Madrid',
+  sessionName = 'Libres 1 (FP1)',
+  circuitName: _circuitName,
   circuit,
 }) => {
+  // Resolve the active Grand Prix currently being raced
+  const currentGp = getNextUpcomingGrandPrix(scheduleSyncService.getState().schedule);
+  const activeCircuit = CIRCUIT_MAP.get(currentGp.circuitId) || circuit || CIRCUIT_MAP.get('baku');
+  const activeCircuitId = activeCircuit?.id || currentGp.circuitId || 'baku';
+  const gpDisplayLabel = `${currentGp.flag || '🏁'} ${currentGp.name}`;
+
   // Helper to parse lap time to seconds
   const parseTimeToSec = (t?: string): number => {
     if (!t || t.includes('-') || t.includes('DNF') || t.trim() === '') return Infinity;
@@ -47,22 +55,54 @@ export const BestLapBenchmarks: React.FC<BestLapBenchmarksProps> = ({
     }
   }
 
-  // Circuit all-time record
-  const circuitRecordTimeStr = circuit?.lapRecord?.time || '1:32.450';
+  // Circuit all-time record for the GP currently being raced
+  const circuitRecordTimeStr = activeCircuit?.lapRecord?.time || '1:43.009';
   const circuitRecordSec = parseTimeToSec(circuitRecordTimeStr);
-  const circuitRecordHolder = circuit?.lapRecord?.driver 
-    ? `${circuit?.lapRecord.driver} (${circuit?.lapRecord.year || 2026})`
-    : 'K. Antonelli, 2026';
+  const circuitRecordHolder = activeCircuit?.lapRecord?.driver
+    ? `${activeCircuit.lapRecord.driver} (${activeCircuit.lapRecord.year || 2026})`
+    : 'C. Leclerc (2019)';
 
-  // Weekend fastest lap benchmark:
-  // Base weekend benchmark (from earlier sessions like FP2 or Qualy)
-  const baseWeekendSec = circuit?.id === 'monza' ? 80.520 : 92.890;
-  // If current session is faster, weekend fastest is the current session fastest!
-  const weekendFastestSec = minSec !== Infinity && minSec < baseWeekendSec ? minSec : baseWeekendSec;
-  const isCurrentSessionWeekendFastest = minSec !== Infinity && minSec <= baseWeekendSec;
-  const weekendDriverInfo = isCurrentSessionWeekendFastest && sessionBestEntry
-    ? `${sessionBestEntry.driver.code} (${sessionName})`
-    : (circuit?.id === 'monza' ? 'M. Verstappen (Practice 2)' : 'C. Leclerc (Practice 2)');
+  // Weekend fastest lap benchmark for the GP currently being raced (persisted across sessions of this GP)
+  const storageKey = `f1_weekend_fastest_${activeCircuitId}`;
+  let savedWeekendBest: { sec: number; driverCode: string; sessionLabel: string } | null = null;
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.sec === 'number' && parsed.sec > 40 && parsed.sec < 200) {
+          savedWeekendBest = parsed;
+        }
+      }
+    } catch {}
+  }
+
+  const cleanSessionShort = sessionName.includes(' - ')
+    ? sessionName.split(' - ').slice(-1)[0]
+    : sessionName;
+
+  if (minSec !== Infinity && sessionBestEntry) {
+    if (!savedWeekendBest || minSec <= savedWeekendBest.sec) {
+      savedWeekendBest = {
+        sec: minSec,
+        driverCode: sessionBestEntry.driver.code,
+        sessionLabel: cleanSessionShort,
+      };
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(savedWeekendBest));
+        } catch {}
+      }
+    }
+  }
+
+  const fallbackWeekendSec = Number.isFinite(circuitRecordSec) ? Math.max(60, circuitRecordSec - 0.420) : 102.589;
+  const weekendFastestSec = savedWeekendBest ? savedWeekendBest.sec : (minSec !== Infinity ? minSec : fallbackWeekendSec);
+  const weekendDriverInfo = savedWeekendBest
+    ? `${savedWeekendBest.driverCode} (${savedWeekendBest.sessionLabel})`
+    : sessionBestEntry
+    ? `${sessionBestEntry.driver.code} (${cleanSessionShort})`
+    : `${activeCircuit?.lapRecord?.driver || 'C. Leclerc'} (FP1)`;
 
   // Format benchmark delta relative to session best
   const renderDeltaBadge = (benchmarkSec: number) => {
@@ -137,8 +177,17 @@ export const BestLapBenchmarks: React.FC<BestLapBenchmarksProps> = ({
             Best Lap Benchmarks
           </span>
         </div>
-        <span title="Official timing benchmarks" style={{ display: 'inline-flex', cursor: 'pointer' }}>
-          <HelpCircle size={15} color="#64748b" />
+        <span style={{
+          fontSize: '0.62rem',
+          fontFamily: 'var(--font-mono)',
+          color: '#e2e8f0',
+          background: 'rgba(255, 255, 255, 0.08)',
+          border: '1px solid rgba(255, 255, 255, 0.14)',
+          padding: '2px 7px',
+          borderRadius: '4px',
+          fontWeight: 700,
+        }} title={activeCircuit?.name || currentGp.circuitName}>
+          {gpDisplayLabel}
         </span>
       </div>
 

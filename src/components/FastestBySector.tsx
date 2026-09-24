@@ -28,33 +28,33 @@ export const FastestBySector: React.FC<FastestBySectorProps> = ({ entries }) => 
     return secs;
   };
 
-  // Find best driver for Sector 1
+  // Find best driver for Sector 1 (using s1BestTime and s1Time)
   let s1BestVal = Infinity;
   let s1BestEntry: LeaderboardEntry | null = null;
   for (const e of entries) {
-    const v = parseSec(e.s1Time);
+    const v = Math.min(parseSec(e.s1BestTime), parseSec(e.s1Time));
     if (v < s1BestVal) {
       s1BestVal = v;
       s1BestEntry = e;
     }
   }
 
-  // Find best driver for Sector 2
+  // Find best driver for Sector 2 (using s2BestTime and s2Time)
   let s2BestVal = Infinity;
   let s2BestEntry: LeaderboardEntry | null = null;
   for (const e of entries) {
-    const v = parseSec(e.s2Time);
+    const v = Math.min(parseSec(e.s2BestTime), parseSec(e.s2Time));
     if (v < s2BestVal) {
       s2BestVal = v;
       s2BestEntry = e;
     }
   }
 
-  // Find best driver for Sector 3
+  // Find best driver for Sector 3 (using s3BestTime and s3Time)
   let s3BestVal = Infinity;
   let s3BestEntry: LeaderboardEntry | null = null;
   for (const e of entries) {
-    const v = parseSec(e.s3Time);
+    const v = Math.min(parseSec(e.s3BestTime), parseSec(e.s3Time));
     if (v < s3BestVal) {
       s3BestVal = v;
       s3BestEntry = e;
@@ -157,7 +157,7 @@ export const FastestBySector: React.FC<FastestBySectorProps> = ({ entries }) => 
             color: '#d354ff',
             textShadow: '0 0 8px rgba(211, 84, 255, 0.4)',
           }}>
-            {s1BestEntry?.s1Time || '28.650'}
+            {s1BestVal !== Infinity ? formatSec(s1BestVal) : (s1BestEntry?.s1BestTime || s1BestEntry?.s1Time || '35.840')}
           </span>
         </div>
 
@@ -205,7 +205,7 @@ export const FastestBySector: React.FC<FastestBySectorProps> = ({ entries }) => 
             color: '#d354ff',
             textShadow: '0 0 8px rgba(211, 84, 255, 0.4)',
           }}>
-            {s2BestEntry?.s2Time || '34.800'}
+            {s2BestVal !== Infinity ? formatSec(s2BestVal) : (s2BestEntry?.s2BestTime || s2BestEntry?.s2Time || '41.120')}
           </span>
         </div>
 
@@ -253,7 +253,7 @@ export const FastestBySector: React.FC<FastestBySectorProps> = ({ entries }) => 
             color: '#d354ff',
             textShadow: '0 0 8px rgba(211, 84, 255, 0.4)',
           }}>
-            {s3BestEntry?.s3Time || '29.000'}
+            {s3BestVal !== Infinity ? formatSec(s3BestVal) : (s3BestEntry?.s3BestTime || s3BestEntry?.s3Time || '25.380')}
           </span>
         </div>
       </div>
