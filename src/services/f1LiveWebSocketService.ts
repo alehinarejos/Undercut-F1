@@ -961,7 +961,10 @@ export class F1LiveWebSocketService {
             mergedSec.Segments = deltaSec.Segments;
             deltaSec.Segments.forEach((seg: any, sIdx: number) => {
               const st = seg && typeof seg === 'object' ? seg.Status : seg;
-              if (st === 2048 || st === 2049 || st === 2051 || st === 2064) {
+              // Only count in-progress (2048) and pit (2064) segments as "active".
+              // 2049 (personal best) and 2051 (overall fastest) are FINALIZATION updates —
+              // counting them here would wrongly trigger the "new lap" heuristic and wipe S2/S3.
+              if (st === 2048 || st === 2064) {
                 maxActiveDeltaIdx = Math.max(maxActiveDeltaIdx, sIdx);
               }
             });
@@ -971,7 +974,8 @@ export class F1LiveWebSocketService {
               if (Number.isFinite(sNum)) {
                 curSegs[sNum] = segVal as any;
                 const st = segVal && typeof segVal === 'object' ? (segVal as any).Status : segVal;
-                if (st === 2048 || st === 2049 || st === 2051 || st === 2064) {
+                // Only count in-progress (2048) and pit (2064) — not finalized 2049/2051.
+                if (st === 2048 || st === 2064) {
                   maxActiveDeltaIdx = Math.max(maxActiveDeltaIdx, sNum);
                 }
               }

@@ -762,17 +762,31 @@ export const App: React.FC = () => {
               <div className="telemetry-layout-grid">
                 {/* Panel Izquierdo: Tabla de Tiempos (Full Height, 80% Ancho) */}
                 <div className="telemetry-left-panel" ref={leftPanelRef}>
-                  <Leaderboard
-                    entries={leaderboard}
-                    selectedDriverId={selectedDriverId}
-                    onSelectDriver={handleSelectDriver}
-                    isQualifying={session.type === 'QUALIFYING'}
-                    sessionType={session.type}
-                    sessionName={session.name}
-                    timeRemainingSec={session.timeRemainingSec}
-                    totalLaps={session.totalLaps}
-                    trackStatus={session.trackStatus}
-                  />
+                  {(() => {
+                    const liveActive = getCurrentScheduledSession();
+                    const effectiveSessionName = liveActive
+                      ? `${liveActive.gp.name} - ${liveActive.sess.name}`
+                      : session.name;
+                    const effectiveRemainingSec = liveActive
+                      ? Math.max(0, Math.round(liveActive.remainingSec))
+                      : session.timeRemainingSec;
+                    const effectiveTrackStatus = liveActive && session.trackStatus === 'CHEQUERED'
+                      ? 'GREEN'
+                      : session.trackStatus;
+                    return (
+                      <Leaderboard
+                        entries={leaderboard}
+                        selectedDriverId={selectedDriverId}
+                        onSelectDriver={handleSelectDriver}
+                        isQualifying={session.type === 'QUALIFYING'}
+                        sessionType={session.type}
+                        sessionName={effectiveSessionName}
+                        timeRemainingSec={effectiveRemainingSec}
+                        totalLaps={session.totalLaps}
+                        trackStatus={effectiveTrackStatus}
+                      />
+                    );
+                  })()}
                 </div>
 
                 {/* Columna Derecha: Benchmarks + Control de Carrera / Radios + Más Rápido por Sector */}
