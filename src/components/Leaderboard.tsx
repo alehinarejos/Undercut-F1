@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useLayoutEffect, useCallback } from 'react';
 import type { LeaderboardEntry } from '../types/telemetry';
 import { TeamLogo } from './TeamLogo';
 
@@ -222,29 +222,91 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
   const [viewMode, setViewMode] = useState<'timing' | 'stints'>('timing');
 
   // Local 1-second ticker so remaining session duration always counts down smoothly in the UI
+  // App.tsx ticks every second and pushes the extrapolated value via props.
+  // We mirror it into local state so CHEQUERED/RED-flag overrides still work.
   const [localRemainingSec, setLocalRemainingSec] = useState<number>(() =>
     timeRemainingSec !== undefined && timeRemainingSec >= 0 ? Math.floor(timeRemainingSec) : 0
   );
 
   React.useEffect(() => {
+    if (trackStatus === 'CHEQUERED') {
+      setLocalRemainingSec(0);
+      return;
+    }
+    if (trackStatus === 'RED') return; // freeze during red flag
     if (timeRemainingSec !== undefined && timeRemainingSec >= 0) {
       setLocalRemainingSec(Math.floor(timeRemainingSec));
     }
-  }, [timeRemainingSec]);
+  }, [timeRemainingSec, trackStatus]);
 
-  React.useEffect(() => {
-    const timer = window.setInterval(() => {
-      setLocalRemainingSec((prev) => {
-        if (trackStatus === 'CHEQUERED') return 0;
-        if (trackStatus === 'RED') return prev;
-        return prev > 0 ? prev - 1 : 0;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [trackStatus]);
+  // ── FLIP animation for smooth position changes ─────────────────────────────
+  // FLIP = First, Last, Invert, Play
+  // 1. FIRST: before React commits the reorder, snapshot each row's Y position
+  // 2. LAST:  after commit, read new Y position
+  // 3. INVERT: apply transform = (first_Y - last_Y) to make it look like it didn't move
+  // 4. PLAY: transition that transform to 0 so it slides smoothly into place
+  const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
+  const prevRectsRef = useRef<Map<string, number>>(new Map());
 
-  // Overtake tracking & animations
-  const prevPositionsRef = React.useRef<Map<string, number>>(new Map());
+  // Called by each row via callback ref to register/unregister its DOM node
+  const registerRow = useCallback((id: string, el: HTMLDivElement | null) => {
+    if (el) {
+      rowRefs.current.set(id, el);
+    } else {
+      rowRefs.current.delete(id);
+    }
+  }, []);
+
+  // FIRST: snapshot Y positions before React re-renders (runs synchronously before paint)
+  useLayoutEffect(() => {
+    const snapshot = new Map<string, number>();
+    for (const [id, el] of rowRefs.current.entries()) {
+      snapshot.set(id, el.getBoundingClientRect().top);
+    }
+    prevRectsRef.current = snapshot;
+  });
+
+  // LAST + INVERT + PLAY: after React commits the DOM reorder, animate rows to new positions
+  useLayoutEffect(() => {
+    const prev = prevRectsRef.current;
+    const animatingIds = new Set<string>();
+
+    for (const [id, el] of rowRefs.current.entries()) {
+      const prevY = prev.get(id);
+      if (prevY === undefined) continue;
+
+      const nextY = el.getBoundingClientRect().top;
+      const deltaY = prevY - nextY;
+
+      // Skip if the row didn't actually move (or moved < 1px)
+      if (Math.abs(deltaY) < 1) continue;
+
+      animatingIds.add(id);
+
+      // Cancel any ongoing animation on this element
+      el.style.transition = 'none';
+      el.style.transform = `translateY(${deltaY}px)`;
+
+      // Force a reflow so the browser registers the inverted position
+      void el.offsetHeight;
+
+      // Now animate back to natural position — clamp duration so fast reorders feel snappy
+      const duration = Math.min(420, Math.max(200, Math.abs(deltaY) * 1.6));
+      el.style.transition = `transform ${duration}ms cubic-bezier(0.25, 0.46, 0.45, 0.94)`;
+      el.style.transform = 'translateY(0)';
+
+      // Clean up inline styles once the animation ends
+      const onEnd = () => {
+        el.style.transition = '';
+        el.style.transform = '';
+        el.removeEventListener('transitionend', onEnd);
+      };
+      el.addEventListener('transitionend', onEnd);
+    }
+  }, [entries]);
+
+  // Overtake tracking (kept for glow/pill highlights — separate from FLIP movement)
+  const prevPositionsRef = useRef<Map<string, number>>(new Map());
   const [overtakes, setOvertakes] = useState<Map<string, { dir: 'up' | 'down'; diff: number; timestamp: number }>>(new Map());
   const [overtakeToast, setOvertakeToast] = useState<{ gained: string; lost: string; pos: number } | null>(null);
 
@@ -627,6 +689,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
               )}
 
               <div
+                ref={(el) => registerRow(entry.driver.id, el)}
                 className={`leaderboard-row ${isSelected ? 'selected' : ''} ${isDriverInPit ? 'in-pit' : ''} ${entry.isEliminationRisk ? 'elimination-danger' : ''} ${entry.isKnockedOut ? 'knocked-out' : ''} ${isOvertakeUp ? 'overtake-row-up' : ''} ${isOvertakeDown ? 'overtake-row-down' : ''}`}
                 onClick={() => onSelectDriver(entry.driver.id)}
               >

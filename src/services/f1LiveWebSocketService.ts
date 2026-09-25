@@ -989,9 +989,12 @@ export class F1LiveWebSocketService {
             mergedSec.Segments = curSegs;
           }
 
-          // When starting a new lap in S1 (microsectors 0..2), clear S2 and S3 from previous lap
+          // New-lap detection: only clear the NEXT sector(s) when segment 0 of the current
+          // sector just became active (maxActiveDeltaIdx === 0). Using <= 2 was too broad —
+          // it fired on any mid-lap status update for segments 0-2, wiping S3 during S2, etc.
           const dSectors = delta.Sectors as any;
-          if (idx === 0 && maxActiveDeltaIdx >= 0 && maxActiveDeltaIdx <= 2 && !dSectors?.[1]?.Segments && !dSectors?.[2]?.Segments) {
+          if (idx === 0 && maxActiveDeltaIdx === 0 && !dSectors?.[1]?.Segments && !dSectors?.[2]?.Segments) {
+            // Segment 0 of S1 just activated → new lap starting: reset S2 and S3
             if (existingSectors[1]) {
               existingSectors[1] = { ...existingSectors[1], Value: '', Segments: [] };
             }
@@ -999,12 +1002,14 @@ export class F1LiveWebSocketService {
               existingSectors[2] = { ...existingSectors[2], Value: '', Segments: [] };
             }
             mergedSec.Value = deltaSec.Value ?? '';
-          } else if (idx === 1 && maxActiveDeltaIdx >= 0 && maxActiveDeltaIdx <= 2 && !dSectors?.[2]?.Segments) {
+          } else if (idx === 1 && maxActiveDeltaIdx === 0 && !dSectors?.[2]?.Segments) {
+            // Segment 0 of S2 just activated → driver crossed into S2: reset S3 only
             if (existingSectors[2]) {
               existingSectors[2] = { ...existingSectors[2], Value: '', Segments: [] };
             }
             mergedSec.Value = deltaSec.Value ?? '';
-          } else if (idx === 2 && maxActiveDeltaIdx >= 0 && maxActiveDeltaIdx <= 2 && !deltaSec.Value) {
+          } else if (idx === 2 && maxActiveDeltaIdx === 0 && !deltaSec.Value && !curSec.Value) {
+            // Segment 0 of S3 just activated for the first time (no existing S3 value) → reset S3 value
             mergedSec.Value = '';
           }
 
@@ -1046,16 +1051,21 @@ export class F1LiveWebSocketService {
       res.IntervalToPositionAhead = { ...(existing.IntervalToPositionAhead || {}), ...delta.IntervalToPositionAhead };
     }
 
-    // Clear stale InPit / PitOut when car is actively setting on-track sectors/laps
-    if (hasActiveOnTrackSector && !hasPitSegment && delta.InPit !== true) {
+    // Clear stale InPit / PitOut ONLY when concrete on-track segment activity is detected.
+    // BestLapTime and LastLapTime alone are NOT reliable evidence that the driver left pits —
+    // they remain populated from previous laps even while the car is stationary in the garage.
+    if (hasActiveOnTrackSector && !hasPitSegment && delta.InPit !== true && !res.InPit) {
+      // Confirmed on-track activity via live segment data AND no explicit pit signal → clear pit
       res.InPit = false;
       if (hasCompletedSector1OrLater && delta.PitOut !== true) {
         res.PitOut = false;
       }
     } else if (hasPitSegment && delta.PitOut !== true && delta.InPit !== false) {
+      // Pit-lane segment (2064) detected → driver is in pit lane
       res.InPit = true;
       res.PitOut = false;
     }
+
 
     return res;
   }
@@ -1203,15 +1213,28 @@ export class F1LiveWebSocketService {
       const s2Segments = this.resolveSegments(s2?.Segments, s2Status, 8, Boolean(rawS2));
       const s3Segments = this.resolveSegments(s3?.Segments, s3Status, 9, Boolean(rawS3));
 
-      // Check latest microsector across all sectors
-      const allActiveSegs = [...s1Segments, ...s2Segments, ...s3Segments].filter(s => s !== 'none');
-      const lastActiveSeg = allActiveSegs.length > 0 ? allActiveSegs[allActiveSegs.length - 1] : null;
-      if (lastActiveSeg && lastActiveSeg !== 'pit' && (rawS1 || rawS2 || rawS3)) {
+      // Check latest microsector across all sectors — only use this to clear InPit
+      // if there are active segments in a sector that is CURRENTLY being driven (no completion time).
+      // Segments in completed sectors (rawS1/S2/S3 set) are evidence of past laps, not current on-track status.
+      const hasCurrentlyDrivingSegments =
+        (!rawS1 && s1Segments.some(s => s !== 'none' && s !== 'pit')) ||
+        (!rawS2 && s2Segments.some(s => s !== 'none' && s !== 'pit')) ||
+        (!rawS3 && s3Segments.some(s => s !== 'none' && s !== 'pit'));
+
+      const hasPitSegmentsNow = [...s1Segments, ...s2Segments, ...s3Segments].some(s => s === 'pit');
+
+      if (hasPitSegmentsNow) {
+        // Live pit-lane microsector → car is definitely in pit
+        resolvedInPit = true;
+        resolvedPitOut = false;
+      } else if (hasCurrentlyDrivingSegments && !line.InPit) {
+        // Car is actively driving a sector right now → not in pit
         resolvedInPit = false;
         if (s2Segments.some(s => s !== 'none' && s !== 'pit') || s3Segments.some(s => s !== 'none' && s !== 'pit')) {
           resolvedPitOut = false;
         }
       }
+
 
       // Gaps
       const gapToLeader = line.GapToLeader || line.TimeDiffToFastest || '';
@@ -1351,13 +1374,22 @@ export class F1LiveWebSocketService {
       return 'none' as SectorStatus;
     });
 
+    // Find the last non-none color in mapped so we can use it to fill gaps.
+    // When a sector is completed, any segment without a final status (still 'none')
+    // means the API hasn't pushed the final status yet — fill with fallback.
+    const lastColor = mapped.reduce<SectorStatus | null>((acc, m) => m !== 'none' ? m : acc, null);
+    const fillColor: SectorStatus = (isCompleted && fallback && fallback !== 'none')
+      ? fallback
+      : (lastColor || 'none');
+
     const result: SectorStatus[] = [];
-    const allActive = mapped.every(m => m !== 'none');
     for (let i = 0; i < targetCount; i++) {
       if (i < mapped.length) {
-        result.push(mapped[i]);
-      } else if (isCompleted && allActive && mapped.length > 0) {
-        result.push(mapped[mapped.length - 1]);
+        // If sector is completed and this slot is still 'none' (API lag), fill with the color
+        result.push(isCompleted && mapped[i] === 'none' ? fillColor : mapped[i]);
+      } else if (isCompleted && fillColor !== 'none') {
+        // Slot beyond what API sent but sector is marked complete — fill
+        result.push(fillColor);
       } else {
         result.push('none');
       }

@@ -69,13 +69,17 @@
   font-family: var(--font-mono);
   font-size: 0.74rem;
   cursor: pointer;
-  transition: background-color 0.15s ease;
+  /* background transition kept; transform transition is handled via JS (FLIP) */
+  transition: background-color 0.18s ease;
   position: relative;
   box-sizing: border-box;
   width: 100%;
   flex-shrink: 0;
   overflow: hidden;
-  contain: layout style;
+  /* 'contain: layout style' removed — it creates an independent layout boundary
+     that can cause getBoundingClientRect to return container-relative coords,
+     interfering with the FLIP position-change animation. */
+  will-change: transform;
 }
 
 .cell-driver-with-logo {

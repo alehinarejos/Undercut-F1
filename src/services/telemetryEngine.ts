@@ -1472,16 +1472,19 @@ export class TelemetryEngine {
   }
 
   private updateEntryMicrosectors(entry: LeaderboardEntry, progress: number) {
-    const s1Len = 0.3333;
-    const s2Len = 0.3333;
-    const s1Micro = s1Len / 8;
-    const s2Micro = s2Len / 8;
-    const s3Micro = 0.3334 / 9;
+    // Sector boundary fractions — must sum to 1.0
+    const S1_END = 0.3333;   // S1: 0 → 0.3333
+    const S2_END = 0.6666;   // S2: 0.3333 → 0.6666
+    // S3: 0.6666 → 1.0 (0.3334)
+    const S1_MICRO = S1_END / 8;
+    const S2_MICRO = (S2_END - S1_END) / 8;
+    const S3_MICRO = (1.0 - S2_END) / 9;
 
-    const lap = entry.lapsCompleted || 1;
-    const dNum = entry.driver.number || 1;
+    const lap  = entry.lapsCompleted || 1;
+    const dNum = entry.driver.number  || 1;
     const isTop = entry.position <= 3;
 
+    /** Build all microsectors for a completed sector (every tick they're fully lit). */
     const buildFullSector = (sectorIdx: number, count: number): SectorStatus[] => {
       const arr: SectorStatus[] = [];
       for (let i = 0; i < count; i++) {
@@ -1490,9 +1493,9 @@ export class TelemetryEngine {
       return arr;
     };
 
-    if (progress < s1Len) {
-      // S1 active: microsectors 0..activeIdx lit, remaining S1 and all of S2 & S3 cleared to 'none'
-      const activeIdx = Math.min(7, Math.floor(progress / s1Micro));
+    if (progress < S1_END) {
+      // ── S1 in progress ──────────────────────────────────────────────────────
+      const activeIdx = Math.min(7, Math.floor(progress / S1_MICRO));
       const s1Segs: SectorStatus[] = [];
       for (let i = 0; i < 8; i++) {
         s1Segs.push(i <= activeIdx ? this.getMicrosectorColor(dNum, lap, 1, i, isTop) : 'none');
@@ -1503,35 +1506,36 @@ export class TelemetryEngine {
       entry.s1Status = s1Segs.slice(0, activeIdx + 1).includes('purple') ? 'purple' : 'green';
       entry.s2Status = 'none';
       entry.s3Status = 'none';
-    } else if (progress < s1Len + s2Len) {
-      // S2 active: S1 completed (all 8 lit), S2 0..activeIdx lit, S3 cleared to 'none'
-      const activeIdx = Math.min(7, Math.floor((progress - s1Len) / s2Micro));
-      if (!entry.s1Segments || entry.s1Segments.length < 8 || entry.s1Segments.includes('none')) {
-        entry.s1Segments = buildFullSector(1, 8);
-      }
+
+    } else if (progress < S2_END) {
+      // ── S2 in progress ──────────────────────────────────────────────────────
+      const activeIdx = Math.min(7, Math.floor((progress - S1_END) / S2_MICRO));
+      // S1 is fully done — always render all 8 segments with their color
+      entry.s1Segments = buildFullSector(1, 8);
       const s2Segs: SectorStatus[] = [];
       for (let i = 0; i < 8; i++) {
         s2Segs.push(i <= activeIdx ? this.getMicrosectorColor(dNum, lap, 2, i, isTop) : 'none');
       }
       entry.s2Segments = s2Segs;
       entry.s3Segments = Array(9).fill('none');
-      entry.s2Status = s2Segs.slice(0, activeIdx + 1).includes('purple') ? 'purple' : 'green';
+      // s2Status reflects whether any lit segment is purple, else use the overall sector status
+      const hasPurpleS2 = s2Segs.slice(0, activeIdx + 1).includes('purple');
+      entry.s2Status = hasPurpleS2 ? 'purple' : activeIdx >= 0 ? 'green' : 'none';
       entry.s3Status = 'none';
+
     } else {
-      // S3 active: S1 & S2 completed (all 8 lit), S3 0..activeIdx lit
-      const activeIdx = Math.min(8, Math.floor((progress - (s1Len + s2Len)) / s3Micro));
-      if (!entry.s1Segments || entry.s1Segments.length < 8 || entry.s1Segments.includes('none')) {
-        entry.s1Segments = buildFullSector(1, 8);
-      }
-      if (!entry.s2Segments || entry.s2Segments.length < 8 || entry.s2Segments.includes('none')) {
-        entry.s2Segments = buildFullSector(2, 8);
-      }
+      // ── S3 in progress ──────────────────────────────────────────────────────
+      const activeIdx = Math.min(8, Math.floor((progress - S2_END) / S3_MICRO));
+      // S1 and S2 are fully done — always render all segments with their colors
+      entry.s1Segments = buildFullSector(1, 8);
+      entry.s2Segments = buildFullSector(2, 8);
       const s3Segs: SectorStatus[] = [];
       for (let i = 0; i < 9; i++) {
         s3Segs.push(i <= activeIdx ? this.getMicrosectorColor(dNum, lap, 3, i, isTop) : 'none');
       }
       entry.s3Segments = s3Segs;
-      entry.s3Status = s3Segs.slice(0, activeIdx + 1).includes('purple') ? 'purple' : 'green';
+      const hasPurpleS3 = s3Segs.slice(0, activeIdx + 1).includes('purple');
+      entry.s3Status = hasPurpleS3 ? 'purple' : activeIdx >= 0 ? 'green' : 'none';
     }
   }
 

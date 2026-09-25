@@ -126,6 +126,36 @@ export const App: React.FC = () => {
   const [isOfficialLive, setIsOfficialLive] = useState<boolean>(false);
   const [, setOfficialStatusMessage] = useState<string>('Conectado a los datos oficiales de Fórmula 1');
 
+  // ── Live session clock tick ────────────────────────────────────────────────
+  // Every second, read the extrapolated remaining time directly from the service
+  // so the countdown stays accurate between WebSocket events. This is the single
+  // source of truth — the Leaderboard just displays what we push here.
+  useEffect(() => {
+    const tick = () => {
+      const wsStatus = f1LiveWebSocketService.getSessionStatus();
+      // Only tick if session is active (not finished, not stopped/red flag)
+      if (
+        wsStatus.isFinished ||
+        wsStatus.isChequered ||
+        wsStatus.isStopped ||
+        wsStatus.remainingSec === undefined ||
+        wsStatus.remainingSec <= 0
+      ) {
+        return;
+      }
+      const extrapolated = Math.max(0, Math.round(wsStatus.remainingSec));
+      setSession(prev => {
+        // Skip update if value didn't change (avoid spurious re-renders)
+        if (prev.timeRemainingSec === extrapolated) return prev;
+        return { ...prev, timeRemainingSec: extrapolated };
+      });
+    };
+
+    const intervalId = window.setInterval(tick, 1000);
+    tick(); // run immediately on mount
+    return () => clearInterval(intervalId);
+  }, []);
+
   // Synchronize right panel height exactly with the leaderboard table
   const leftPanelRef = useRef<HTMLDivElement>(null);
   const [leftPanelHeight, setLeftPanelHeight] = useState<number | null>(null);
