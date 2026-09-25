@@ -334,18 +334,20 @@
   gap: 12px;
   height: 100%;
   box-sizing: border-box;
-  overflow: hidden;
-  padding-right: 2px;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+  padding-right: 4px;
 }
 
 .telemetry-right-panel::-webkit-scrollbar {
-  width: 4px;
+  width: 5px;
 }
 
 .telemetry-right-panel::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.2);
   border-radius: 4px;
 }
+
 
 /* Track Flag Indicator Bar */
 .track-flag-indicator-bar {

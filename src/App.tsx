@@ -15,6 +15,7 @@ import type {
 } from './types/telemetry';
 import { Header } from './components/Header';
 import { Leaderboard } from './components/Leaderboard';
+import { DriverLapTracker } from './components/DriverLapTracker';
 import { BestLapBenchmarks } from './components/BestLapBenchmarks';
 import { FastestBySector } from './components/FastestBySector';
 import { RaceControl } from './components/RaceControl';
@@ -763,6 +764,7 @@ export const App: React.FC = () => {
   const handleSelectDriver = (driverId: string) => {
     setSelectedDriverId(driverId);
     engine.setSelectedDriver(driverId);
+    setTelemetry(engine.getSelectedTelemetry());
   };
 
   return (
@@ -824,7 +826,7 @@ export const App: React.FC = () => {
                   })()}
                 </div>
 
-                {/* Columna Derecha: Benchmarks + Control de Carrera / Radios + Más Rápido por Sector */}
+                {/* Columna Derecha: Tarjeta de Seguimiento + Benchmarks + Control de Carrera / Radios + Más Rápido por Sector */}
                 <div 
                   className="telemetry-right-panel"
                   style={{
@@ -832,7 +834,15 @@ export const App: React.FC = () => {
                     maxHeight: leftPanelHeight ? `${leftPanelHeight}px` : undefined,
                   }}
                 >
-                  {/* 1. Best Lap Benchmarks (Session Best, Weekend Best, Circuit Record) */}
+                  {/* 1. Tarjeta de Seguimiento del Piloto Seleccionado (Vuelta en Directo) */}
+                  <DriverLapTracker
+                    entry={leaderboard.find(e => e.driver.id === selectedDriverId) || leaderboard[0]}
+                    telemetry={telemetry}
+                    allEntries={leaderboard}
+                    onSelectDriver={handleSelectDriver}
+                  />
+
+                  {/* 2. Best Lap Benchmarks (Session Best, Weekend Best, Circuit Record) */}
                   <BestLapBenchmarks
                     entries={leaderboard}
                     sessionName={session.name || 'Practice 3'}
@@ -840,15 +850,15 @@ export const App: React.FC = () => {
                     circuit={session.circuit}
                   />
 
-                  {/* 2. Control de Carrera y Radios de Equipo (flex: 1 con scroll interno en los mensajes) */}
-                  <div className="telemetry-rc-section" style={{ flex: '1 1 0', minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  {/* 3. Control de Carrera y Radios de Equipo */}
+                  <div className="telemetry-rc-section" style={{ flex: '1 1 0', minHeight: '160px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
                     <RaceControl
                       messages={raceControlMessages}
                       radios={teamRadios}
                     />
                   </div>
 
-                  {/* 3. Más Rápido por Sector (Sustituye al velocímetro) */}
+                  {/* 4. Más Rápido por Sector */}
                   <FastestBySector entries={leaderboard} />
                 </div>
               </div>
