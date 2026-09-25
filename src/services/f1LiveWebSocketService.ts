@@ -1160,9 +1160,18 @@ export class F1LiveWebSocketService {
       const s2 = sectors[1];
       const s3 = sectors[2];
 
+      // rawS1/S2/S3: includes PreviousValue for display (shows last lap's sector time while current is in progress)
       const rawS1 = s1?.Value || s1?.PreviousValue || '';
       const rawS2 = s2?.Value || s2?.PreviousValue || '';
       const rawS3 = s3?.Value || s3?.PreviousValue || '';
+
+      // currentS1/S2/S3: ONLY the current lap's value — used for isCompleted in resolveSegments.
+      // PreviousValue is the PREVIOUS lap's sector time — using it here would make resolveSegments
+      // think the current sector is "complete" and fill ALL segments at once. Never use PreviousValue here.
+      const currentS1 = (s1?.Value || '').trim();
+      const currentS2 = (s2?.Value || '').trim();
+      const currentS3 = (s3?.Value || '').trim();
+
       const rawBestLap = line.BestLapTime?.Value || existingEntry?.bestLapTime || '';
 
       if (this.updateBestSectorRecord(
@@ -1209,17 +1218,18 @@ export class F1LiveWebSocketService {
       const s2Status = this.resolveSectorStatus(s2, resolvedInPit);
       const s3Status = this.resolveSectorStatus(s3, resolvedInPit);
 
-      const s1Segments = this.resolveSegments(s1?.Segments, s1Status, 8, Boolean(rawS1));
-      const s2Segments = this.resolveSegments(s2?.Segments, s2Status, 8, Boolean(rawS2));
-      const s3Segments = this.resolveSegments(s3?.Segments, s3Status, 9, Boolean(rawS3));
+      const s1Segments = this.resolveSegments(s1?.Segments, s1Status, 8, Boolean(currentS1));
+      const s2Segments = this.resolveSegments(s2?.Segments, s2Status, 8, Boolean(currentS2));
+      const s3Segments = this.resolveSegments(s3?.Segments, s3Status, 9, Boolean(currentS3));
+
 
       // Check latest microsector across all sectors — only use this to clear InPit
       // if there are active segments in a sector that is CURRENTLY being driven (no completion time).
       // Segments in completed sectors (rawS1/S2/S3 set) are evidence of past laps, not current on-track status.
       const hasCurrentlyDrivingSegments =
-        (!rawS1 && s1Segments.some(s => s !== 'none' && s !== 'pit')) ||
-        (!rawS2 && s2Segments.some(s => s !== 'none' && s !== 'pit')) ||
-        (!rawS3 && s3Segments.some(s => s !== 'none' && s !== 'pit'));
+        (!currentS1 && s1Segments.some(s => s !== 'none' && s !== 'pit')) ||
+        (!currentS2 && s2Segments.some(s => s !== 'none' && s !== 'pit')) ||
+        (!currentS3 && s3Segments.some(s => s !== 'none' && s !== 'pit'));
 
       const hasPitSegmentsNow = [...s1Segments, ...s2Segments, ...s3Segments].some(s => s === 'pit');
 
