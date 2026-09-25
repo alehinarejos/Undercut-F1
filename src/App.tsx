@@ -114,7 +114,7 @@ export const App: React.FC = () => {
     return base;
   });
   const [selectedDriverId, setSelectedDriverId] = useState<string>(() => engine.getSelectedDriverId());
-  const [telemetry, setTelemetry] = useState<CarTelemetryType | null>(() => engine.getSelectedTelemetry());
+  const [, setTelemetry] = useState<CarTelemetryType | null>(() => engine.getSelectedTelemetry());
   const [, setPitPrediction] = useState<PitPrediction | null>(() => engine.calculatePitPrediction('ant'));
   const [raceControlMessages, setRaceControlMessages] = useState<RaceControlMessage[]>(() => engine.getRaceControlMessages());
   const [teamRadios, setTeamRadios] = useState<TeamRadio[]>(() => engine.getTeamRadios());
@@ -837,7 +837,6 @@ export const App: React.FC = () => {
                   {/* 1. Tarjeta de Seguimiento del Piloto Seleccionado (Vuelta en Directo) */}
                   <DriverLapTracker
                     entry={leaderboard.find(e => e.driver.id === selectedDriverId) || leaderboard[0]}
-                    telemetry={telemetry}
                     allEntries={leaderboard}
                     onSelectDriver={handleSelectDriver}
                   />

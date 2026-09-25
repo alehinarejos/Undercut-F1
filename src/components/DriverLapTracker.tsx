@@ -1,18 +1,16 @@
 import React from 'react';
-import { ChevronLeft, ChevronRight, Navigation } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Navigation, Timer, Flag } from 'lucide-react';
 import { TeamLogo } from './TeamLogo';
-import type { LeaderboardEntry, CarTelemetry } from '../types/telemetry';
+import type { LeaderboardEntry } from '../types/telemetry';
 
 interface DriverLapTrackerProps {
   entry: LeaderboardEntry | undefined;
-  telemetry: CarTelemetry | null;
   allEntries: LeaderboardEntry[];
   onSelectDriver: (driverId: string) => void;
 }
 
 export const DriverLapTracker: React.FC<DriverLapTrackerProps> = ({
   entry,
-  telemetry,
   allEntries,
   onSelectDriver,
 }) => {
@@ -52,18 +50,6 @@ export const DriverLapTracker: React.FC<DriverLapTrackerProps> = ({
     : trackProgress < 0.6666 
     ? 2 
     : 3;
-
-  // Telemetry fallback / extraction
-  const speed = telemetry?.speed ?? 0;
-  const gear = telemetry?.gear ?? (isPit ? 1 : 0);
-  const rpm = telemetry?.rpm ?? (isPit ? 4200 : 10500);
-  const throttle = telemetry?.throttle ?? 0;
-  const brake = telemetry?.brake ?? 0;
-  const drs = telemetry?.drs ?? 0;
-
-  // RPM Shift lights (15 LEDs: 5 green, 5 red, 5 purple)
-  const rpmRatio = Math.max(0, Math.min(1, (rpm - 8500) / 5500));
-  const activeLights = Math.floor(rpmRatio * 15);
 
   // Compound styling
   const comp = entry.tyre?.compound || 'MEDIUM';
@@ -282,7 +268,7 @@ export const DriverLapTracker: React.FC<DriverLapTrackerProps> = ({
                   fontFamily: 'var(--font-mono)',
                   letterSpacing: '0.04em',
                 }}>
-                  SECTOR {currentSector}
+                  SECTOR {currentSector} ({progressPercent}%)
                 </span>
               </div>
             )}
@@ -364,7 +350,7 @@ export const DriverLapTracker: React.FC<DriverLapTrackerProps> = ({
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.58rem', fontFamily: 'var(--font-mono)', color: '#64748b' }}>
           <span style={{ color: currentSector === 1 ? '#00e676' : '#64748b', fontWeight: currentSector === 1 ? 800 : 600 }}>S1 (33%)</span>
           <span style={{ color: currentSector === 2 ? '#00e676' : '#64748b', fontWeight: currentSector === 2 ? 800 : 600 }}>S2 (66%)</span>
-          <span style={{ color: currentSector === 3 ? '#00e676' : '#64748b', fontWeight: currentSector === 3 ? 800 : 600 }}>S3 (FINISH)</span>
+          <span style={{ color: currentSector === 3 ? '#00e676' : '#64748b', fontWeight: currentSector === 3 ? 800 : 600 }}>S3 (META)</span>
         </div>
 
         {/* 25 Microsectors Row live */}
@@ -389,7 +375,7 @@ export const DriverLapTracker: React.FC<DriverLapTrackerProps> = ({
           background: 'rgba(0, 0, 0, 0.4)',
           border: '1px solid rgba(255, 255, 255, 0.06)',
           borderRadius: '6px',
-          padding: '5px 8px',
+          padding: '6px 8px',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -400,7 +386,7 @@ export const DriverLapTracker: React.FC<DriverLapTrackerProps> = ({
           </span>
           <span style={{
             fontFamily: 'var(--font-mono)',
-            fontSize: '0.82rem',
+            fontSize: '0.86rem',
             fontWeight: 800,
             color: getSectorColor(entry.s1Status, entry.s1Time),
             letterSpacing: '0.02em',
@@ -417,7 +403,7 @@ export const DriverLapTracker: React.FC<DriverLapTrackerProps> = ({
           background: 'rgba(0, 0, 0, 0.4)',
           border: '1px solid rgba(255, 255, 255, 0.06)',
           borderRadius: '6px',
-          padding: '5px 8px',
+          padding: '6px 8px',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -428,7 +414,7 @@ export const DriverLapTracker: React.FC<DriverLapTrackerProps> = ({
           </span>
           <span style={{
             fontFamily: 'var(--font-mono)',
-            fontSize: '0.82rem',
+            fontSize: '0.86rem',
             fontWeight: 800,
             color: getSectorColor(entry.s2Status, entry.s2Time),
             letterSpacing: '0.02em',
@@ -445,7 +431,7 @@ export const DriverLapTracker: React.FC<DriverLapTrackerProps> = ({
           background: 'rgba(0, 0, 0, 0.4)',
           border: '1px solid rgba(255, 255, 255, 0.06)',
           borderRadius: '6px',
-          padding: '5px 8px',
+          padding: '6px 8px',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -456,7 +442,7 @@ export const DriverLapTracker: React.FC<DriverLapTrackerProps> = ({
           </span>
           <span style={{
             fontFamily: 'var(--font-mono)',
-            fontSize: '0.82rem',
+            fontSize: '0.86rem',
             fontWeight: 800,
             color: getSectorColor(entry.s3Status, entry.s3Time),
             letterSpacing: '0.02em',
@@ -469,140 +455,52 @@ export const DriverLapTracker: React.FC<DriverLapTrackerProps> = ({
         </div>
       </div>
 
-      {/* 4. Live Steering Wheel Shift Lights & Telemetry Gauges */}
+      {/* 4. Lap Times Summary Box: LAST LAP vs BEST LAP */}
       <div style={{
-        background: 'rgba(0, 0, 0, 0.5)',
+        background: 'rgba(0, 0, 0, 0.45)',
         border: '1px solid rgba(255, 255, 255, 0.06)',
         borderRadius: '7px',
-        padding: '8px 10px',
-        display: 'flex',
-        flexDirection: 'column',
+        padding: '8px 12px',
+        display: 'grid',
+        gridTemplateColumns: '1fr 1fr',
         gap: '8px',
       }}>
-        {/* F1 Steering Wheel Shift Lights */}
-        <div style={{ display: 'flex', gap: '3px', width: '100%', justifyContent: 'center' }}>
-          {Array.from({ length: 15 }).map((_, i) => {
-            const isActive = i < activeLights;
-            const color =
-              i < 5 ? '#00e676' :
-              i < 10 ? '#ff3b30' : '#d354ff';
-
-            return (
-              <div
-                key={i}
-                style={{
-                  flex: 1,
-                  height: '5px',
-                  borderRadius: '2px',
-                  background: isActive ? color : 'rgba(255, 255, 255, 0.08)',
-                  boxShadow: isActive ? `0 0 6px ${color}` : 'none',
-                  transition: 'background 0.08s ease',
-                }}
-              />
-            );
-          })}
+        {/* Last Lap */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Timer size={11} color="#64748b" />
+            <span style={{ fontSize: '0.58rem', fontFamily: 'var(--font-mono)', color: '#94a3b8', fontWeight: 800 }}>
+              ÚLTIMA VUELTA
+            </span>
+          </div>
+          <span style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.94rem',
+            fontWeight: 900,
+            color: entry.lastLapTime && !isPit ? '#00e676' : '#cbd5e1',
+            letterSpacing: '0.01em',
+          }}>
+            {entry.lastLapTime || entry.currentLapTime || '—'}
+          </span>
         </div>
 
-        {/* Speed, Gear, DRS & Pedals Row */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 1fr', gap: '8px', alignItems: 'center' }}>
-          {/* Speed Digital Readout */}
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
-              <span style={{
-                fontFamily: 'var(--font-display)',
-                fontWeight: 900,
-                fontSize: '1.75rem',
-                color: '#fff',
-                lineHeight: 1,
-              }}>
-                {speed}
-              </span>
-              <span style={{ fontSize: '0.62rem', fontFamily: 'var(--font-mono)', color: '#94a3b8', fontWeight: 800 }}>
-                KM/H
-              </span>
-            </div>
-            <span style={{ fontSize: '0.58rem', fontFamily: 'var(--font-mono)', color: '#64748b' }}>
-              {rpm.toLocaleString()} RPM
+        {/* Best Lap */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+            <Flag size={11} color="#c084fc" />
+            <span style={{ fontSize: '0.58rem', fontFamily: 'var(--font-mono)', color: '#c084fc', fontWeight: 800 }}>
+              MEJOR VUELTA
             </span>
           </div>
-
-          {/* Gear + DRS */}
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '2px' }}>
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: '38px',
-              height: '38px',
-              background: 'rgba(255, 255, 255, 0.06)',
-              border: '1.5px solid rgba(255, 255, 255, 0.14)',
-              borderRadius: '6px',
-            }}>
-              <span style={{
-                fontFamily: 'var(--font-display)',
-                fontWeight: 900,
-                fontSize: '1.35rem',
-                color: gear === 0 ? '#ffd60a' : '#00e676',
-                lineHeight: 1,
-              }}>
-                {gear === 0 ? 'N' : gear}
-              </span>
-            </div>
-
-            <span style={{
-              fontSize: '0.52rem',
-              fontWeight: 900,
-              fontFamily: 'var(--font-mono)',
-              padding: '1px 5px',
-              borderRadius: '3px',
-              background: drs === 2 ? 'rgba(0, 230, 118, 0.25)' : 'rgba(255, 255, 255, 0.05)',
-              color: drs === 2 ? '#00e676' : '#64748b',
-              border: `1px solid ${drs === 2 ? '#00e676' : 'transparent'}`,
-            }}>
-              {drs === 2 ? 'DRS' : 'DRS OFF'}
-            </span>
-          </div>
-
-          {/* Dual Pedals: Throttle (Green) & Brake (Red) */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {/* Throttle */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span style={{ fontSize: '0.55rem', fontFamily: 'var(--font-mono)', color: '#00e676', fontWeight: 800, width: '16px' }}>
-                THR
-              </span>
-              <div style={{ flex: 1, height: '6px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden' }}>
-                <div style={{
-                  width: `${throttle}%`,
-                  height: '100%',
-                  background: '#00e676',
-                  boxShadow: '0 0 6px #00e676',
-                  transition: 'width 0.08s ease',
-                }} />
-              </div>
-              <span style={{ fontSize: '0.55rem', fontFamily: 'var(--font-mono)', color: '#94a3b8', width: '22px', textAlign: 'right' }}>
-                {throttle}%
-              </span>
-            </div>
-
-            {/* Brake */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              <span style={{ fontSize: '0.55rem', fontFamily: 'var(--font-mono)', color: '#ff3b30', fontWeight: 800, width: '16px' }}>
-                BRK
-              </span>
-              <div style={{ flex: 1, height: '6px', background: 'rgba(255, 255, 255, 0.08)', borderRadius: '2px', overflow: 'hidden' }}>
-                <div style={{
-                  width: `${brake}%`,
-                  height: '100%',
-                  background: '#ff3b30',
-                  boxShadow: '0 0 6px #ff3b30',
-                  transition: 'width 0.08s ease',
-                }} />
-              </div>
-              <span style={{ fontSize: '0.55rem', fontFamily: 'var(--font-mono)', color: '#94a3b8', width: '22px', textAlign: 'right' }}>
-                {brake}%
-              </span>
-            </div>
-          </div>
+          <span style={{
+            fontFamily: 'var(--font-mono)',
+            fontSize: '0.94rem',
+            fontWeight: 900,
+            color: entry.bestLapTime ? '#f8fafc' : '#64748b',
+            letterSpacing: '0.01em',
+          }}>
+            {entry.bestLapTime || '—'}
+          </span>
         </div>
       </div>
 
@@ -611,7 +509,7 @@ export const DriverLapTracker: React.FC<DriverLapTrackerProps> = ({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'space-between',
-        padding: '4px 2px',
+        padding: '2px 2px',
         fontSize: '0.68rem',
         fontFamily: 'var(--font-mono)',
         color: '#94a3b8',
