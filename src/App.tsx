@@ -19,6 +19,7 @@ import { DriverLapTracker } from './components/DriverLapTracker';
 import { BestLapBenchmarks } from './components/BestLapBenchmarks';
 import { FastestBySector } from './components/FastestBySector';
 import { RaceControl } from './components/RaceControl';
+import { RaceControlToast } from './components/RaceControlToast';
 import { ScheduleView } from './components/ScheduleView';
 import { HomeDashboardView } from './components/HomeDashboardView';
 import { OfficialLeaderboardView } from './components/OfficialLeaderboardView';
@@ -911,6 +912,9 @@ export const App: React.FC = () => {
           {t('footer_subtext')}
         </p>
       </footer>
+
+      {/* Race Control Live Bottom-Right Toast Notifications */}
+      <RaceControlToast messages={raceControlMessages} />
     </div>
   );
 };

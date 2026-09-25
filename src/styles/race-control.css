@@ -477,3 +477,24 @@
   0% { opacity: 0.4; }
   100% { opacity: 1; }
 }
+
+@keyframes f1ToastSlideIn {
+  0% {
+    opacity: 0;
+    transform: translateX(40px) scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes f1ToastCountdown {
+  0% {
+    width: 100%;
+  }
+  100% {
+    width: 0%;
+  }
+}
+
