@@ -227,57 +227,53 @@ export const RaceControl: React.FC<RaceControlProps> = ({
 
   return (
     <div className="f1-card race-control-container f1dash-style">
-      {/* Header Bar */}
-      <div className="f1dash-rc-header">
-        <div className="f1dash-rc-title-group">
-          <ShieldAlert size={15} className="f1dash-rc-icon" />
-          <span className="f1dash-rc-title">Race Control</span>
-          <span className="f1dash-count-pill">{messages.length}</span>
+      {/* Unified Compact Header Bar: Tabs on the left, action buttons on the right */}
+      <div className="f1dash-rc-header compact">
+        {/* Left: Compact Segmented Tabs */}
+        <div className="f1dash-tab-group-compact">
+          <button
+            className={`f1dash-tab-segment compact ${activeTab === 'rc' ? 'active' : ''}`}
+            onClick={() => setActiveTab('rc')}
+          >
+            <ShieldAlert size={12} />
+            <span>{t('race_control')}</span>
+            <span className="f1dash-tab-cnt">{messages.length}</span>
+          </button>
+
+          <button
+            className={`f1dash-tab-segment compact ${activeTab === 'radio' ? 'active' : ''}`}
+            onClick={() => setActiveTab('radio')}
+          >
+            <Radio size={12} />
+            <span>{t('team_radios')}</span>
+            <span className="f1dash-tab-cnt">{radios.length}</span>
+          </button>
         </div>
 
+        {/* Right: Actions */}
         <div className="f1dash-header-actions">
           {/* Filter Toggle Button */}
           {activeTab === 'rc' && (
             <button
-              className={`f1dash-action-btn ${showFilters ? 'active' : ''}`}
+              className={`f1dash-action-btn compact ${showFilters ? 'active' : ''}`}
               onClick={() => setShowFilters(prev => !prev)}
               title="Filtros"
             >
-              <Filter size={13} />
+              <Filter size={11} />
             </button>
           )}
 
           {/* Audio Sound Toggle Button */}
           <button
-            className={`f1dash-action-btn ${soundEnabled ? 'sound-on' : 'sound-off'}`}
+            className={`f1dash-action-btn compact ${soundEnabled ? 'sound-on' : 'sound-off'}`}
             onClick={toggleSound}
             title={soundEnabled ? 'Silenciar notificaciones' : 'Activar sonido'}
           >
-            {soundEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
+            {soundEnabled ? <Volume2 size={11} /> : <VolumeX size={11} />}
           </button>
         </div>
       </div>
 
-      {/* Segmented Tab Bar: 100% width, no overflow, perfectly fitting in any language */}
-      <div className="f1dash-tab-bar">
-        <button
-          className={`f1dash-tab-segment ${activeTab === 'rc' ? 'active' : ''}`}
-          onClick={() => setActiveTab('rc')}
-        >
-          <ShieldAlert size={12} />
-          <span>{t('race_control')}</span>
-          <span className="f1dash-tab-cnt">{messages.length}</span>
-        </button>
-
-        <button
-          className={`f1dash-tab-segment ${activeTab === 'radio' ? 'active' : ''}`}
-          onClick={() => setActiveTab('radio')}
-        >
-          <Radio size={12} />
-          <span>{t('team_radios')}</span>
-          <span className="f1dash-tab-cnt">{radios.length}</span>
-        </button>
-      </div>
 
       {/* Filter Chips Bar (Collapsible / Formula1Dashboard style) */}
       {activeTab === 'rc' && showFilters && (
