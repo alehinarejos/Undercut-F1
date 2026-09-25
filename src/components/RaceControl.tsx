@@ -60,9 +60,30 @@ export const RaceControl: React.FC<RaceControlProps> = ({
     setSoundEnabled(prev => !prev);
   };
 
+  const cleanMessageText = (txt?: string): string => {
+    if (!txt) return '';
+    const trimmed = txt.trim();
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed && typeof parsed === 'object') {
+          if (parsed.Message) return String(parsed.Message);
+          if (parsed.messageEn) return String(parsed.messageEn);
+          const firstVal = Object.values(parsed)[0] as any;
+          if (typeof firstVal === 'string') return firstVal;
+          if (firstVal && typeof firstVal === 'object' && (firstVal.Message || firstVal.messageEn)) {
+            return String(firstVal.Message || firstVal.messageEn);
+          }
+        }
+      } catch {}
+    }
+    return txt;
+  };
+
   // Helper to extract category, badges and colors matching Formula1Dashboard exactly
   const getBadgeMeta = (msg: RaceControlMessage): BadgeMeta => {
-    const rawEn = (msg.messageEn || '').toUpperCase();
+    const cleaned = cleanMessageText(msg.messageEn);
+    const rawEn = (cleaned || '').toUpperCase();
     const sectorMatch = rawEn.match(/(?:SECTOR|TRACK SECTOR)\s*(\d+)/i) || (msg.scope?.match(/Sector\s*(\d+)/i));
     const secNum = sectorMatch ? sectorMatch[1] : null;
 
@@ -356,13 +377,13 @@ export const RaceControl: React.FC<RaceControlProps> = ({
 
                   {/* Body Message */}
                   <div className="f1dash-card-body">
-                    {msg.messageEn}
+                    {cleanMessageText(msg.messageEn)}
                   </div>
 
                   {/* Spanish translation if active */}
                   {language !== 'en' && msg.messageEs && msg.messageEs !== msg.messageEn && (
                     <div className="f1dash-card-translation">
-                      {msg.messageEs}
+                      {cleanMessageText(msg.messageEs)}
                     </div>
                   )}
                 </div>

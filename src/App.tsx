@@ -472,8 +472,23 @@ export const App: React.FC = () => {
       },
       onRaceControl: (rawMsg) => {
         if (!rawMsg) return;
-        const rawText = typeof rawMsg === 'string' ? rawMsg : rawMsg.Message || rawMsg.messageEn || JSON.stringify(rawMsg);
-        const flagStr = String(rawMsg.Flag || rawMsg.flag || '').toUpperCase();
+        let actual = rawMsg;
+        if (actual && typeof actual === 'object' && !actual.Message && !actual.messageEn) {
+          const inner = Object.values(actual)[0] as any;
+          if (inner && typeof inner === 'object' && (inner.Message || inner.messageEn)) {
+            actual = inner;
+          }
+        }
+
+        const rawText = typeof actual === 'string'
+          ? actual
+          : (actual.Message || actual.messageEn || actual.message || '');
+
+        if (!rawText || (typeof rawText === 'string' && rawText.trim().startsWith('{'))) {
+          return;
+        }
+
+        const flagStr = String(actual.Flag || actual.flag || '').toUpperCase();
         let flag: RaceControlMessage['flag'] = 'GREEN';
         if (flagStr.includes('DOUBLE') || rawText.toUpperCase().includes('DOUBLE YELLOW')) {
           flag = 'DOUBLE_YELLOW';
@@ -483,6 +498,8 @@ export const App: React.FC = () => {
           flag = 'RED';
         } else if (flagStr.includes('CHEQUERED') || rawText.toUpperCase().includes('CHEQUERED')) {
           flag = 'CHEQUERED';
+        } else if (flagStr.includes('CLEAR') || rawText.toUpperCase().includes('CLEAR')) {
+          flag = 'GREEN';
         }
 
         let category: RaceControlMessage['category'] = 'FLAG';
@@ -492,19 +509,19 @@ export const App: React.FC = () => {
         else if (upper.includes('PIT')) category = 'PIT_LANE';
         else if (upper.includes('RAIN') || upper.includes('WEATHER')) category = 'WEATHER';
 
-        const timeStr = rawMsg.Utc 
-          ? new Date(rawMsg.Utc).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        const timeStr = actual.Utc 
+          ? new Date(actual.Utc).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
           : new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
         const newMsg: RaceControlMessage = {
-          id: `rc-sig-${rawMsg.Utc || Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          id: `rc-sig-${actual.Utc || Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
           timestamp: timeStr,
           flag,
-          scope: rawMsg.Scope || 'Track',
-          sector: rawMsg.Sector ? Number(rawMsg.Sector) : undefined,
-          driverNumber: rawMsg.RacingNumber ? Number(rawMsg.RacingNumber) : undefined,
+          scope: actual.Scope || 'Track',
+          sector: actual.Sector ? Number(actual.Sector) : undefined,
+          driverNumber: actual.RacingNumber ? Number(actual.RacingNumber) : undefined,
           messageEn: rawText,
-          messageEs: rawMsg.messageEs || rawText,
+          messageEs: actual.messageEs || f1LiveWebSocketService.translateRaceControlMessage(rawText),
           category,
         };
 

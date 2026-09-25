@@ -776,7 +776,7 @@ export class F1LiveWebSocketService {
     this.notifySessionStatus();
   }
 
-  private translateRaceControlMessage(text: string): string {
+  public translateRaceControlMessage(text: string): string {
     const t = text.toUpperCase();
     if (t.includes('CLEAR IN TRACK SECTOR')) {
       return text.replace(/CLEAR IN TRACK SECTOR\s*([0-9]+)/i, 'PISTA DESPEJADA EN SECTOR $1');
@@ -805,13 +805,30 @@ export class F1LiveWebSocketService {
 
   private processRaceControlMessages(data: any): void {
     if (!data) return;
-    const rawList: any[] = Array.isArray(data.Messages) 
-      ? data.Messages 
-      : Array.isArray(data) 
-      ? data 
-      : typeof data === 'object' 
-      ? Object.values(data) 
-      : [];
+    const extractItems = (input: any): any[] => {
+      if (!input || typeof input !== 'object') return [];
+      if (Array.isArray(input)) return input;
+      if (input.Messages) {
+        if (Array.isArray(input.Messages)) return input.Messages;
+        if (typeof input.Messages === 'object') return Object.values(input.Messages);
+      }
+      if (input.Message || input.messageEn) return [input];
+      const values = Object.values(input);
+      const flattened: any[] = [];
+      for (const v of values) {
+        if (v && typeof v === 'object') {
+          const itemObj = v as any;
+          if (itemObj.Message || itemObj.messageEn) {
+            flattened.push(itemObj);
+          } else {
+            flattened.push(...extractItems(itemObj));
+          }
+        }
+      }
+      return flattened;
+    };
+
+    const rawList = extractItems(data);
 
     for (const item of rawList) {
       if (!item || typeof item !== 'object' || !item.Message) continue;
