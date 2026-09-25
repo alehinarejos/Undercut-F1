@@ -178,9 +178,12 @@ function getContrastTextColor(hexColor?: string): string {
 }
 
 const VERIFIED_TEAM_COLORS: Record<string, string> = {
-  // Ferrari -> Rosso Corsa
+  // Ferrari -> Rosso Corsa (Bright scarlet red)
   LEC: '#E8002D',
   HAM: '#E8002D',
+  // Audi -> Audi Sport Crimson (Deep dark crimson red)
+  HUL: '#A6051A',
+  BOR: '#A6051A',
   // McLaren -> Papaya Orange
   NOR: '#FF8000',
   PIA: '#FF8000',
@@ -190,43 +193,40 @@ const VERIFIED_TEAM_COLORS: Record<string, string> = {
   // Aston Martin -> British Racing Green
   ALO: '#229971',
   STR: '#229971',
-  // Red Bull Racing -> Deep Navy Blue
-  VER: '#1434CB',
-  HAD: '#1434CB',
-  // Alpine -> BWT Pink (Distinct from blues)
-  GAS: '#FF87BC',
-  COL: '#FF87BC',
-  // Williams -> Williams Cyan / Sky Blue
-  SAI: '#00A0DE',
-  ALB: '#00A0DE',
-  // Racing Bulls -> VCARB Cobalt Blue
+  // Red Bull Racing -> Oracle Deep Navy Blue (Dark midnight navy)
+  VER: '#17356D',
+  HAD: '#17356D',
+  // Alpine -> Bleu Alpine (Vibrant French racing blue)
+  GAS: '#0085CA',
+  COL: '#0085CA',
+  // Williams -> Williams Cyan (Bright light sky cyan)
+  SAI: '#38B6FF',
+  ALB: '#38B6FF',
+  // Racing Bulls -> VCARB Cobalt (Electric royal/iris blue)
   LAW: '#6692FF',
   LIN: '#6692FF',
-  // Haas -> Silver Metal
+  // Haas -> Haas Silver Metal
   OCO: '#B6BABD',
   BEA: '#B6BABD',
-  // Audi / Sauber -> Neon Fluo Green (Distinct from Ferrari red)
-  HUL: '#52E252',
-  BOR: '#52E252',
-  // Cadillac -> Cadillac Gold (Distinct from Haas silver)
+  // Cadillac -> Cadillac Gold V-Series
   PER: '#C8A84E',
   BOT: '#C8A84E',
 };
 
 const VERIFIED_TEAM_NAME_COLORS: Record<string, string> = {
   ferrari: '#E8002D',
+  audi: '#A6051A',
+  sauber: '#A6051A',
   mclaren: '#FF8000',
   mercedes: '#00D2BE',
   'aston martin': '#229971',
-  'red bull': '#1434CB',
-  alpine: '#FF87BC',
-  williams: '#00A0DE',
+  'red bull': '#17356D',
+  alpine: '#0085CA',
+  williams: '#38B6FF',
   'racing bulls': '#6692FF',
   rb: '#6692FF',
   vcarb: '#6692FF',
   haas: '#B6BABD',
-  audi: '#52E252',
-  sauber: '#52E252',
   cadillac: '#C8A84E',
 };
 
