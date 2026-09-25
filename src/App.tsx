@@ -114,7 +114,7 @@ export const App: React.FC = () => {
     return base;
   });
   const [selectedDriverId, setSelectedDriverId] = useState<string>(() => engine.getSelectedDriverId());
-  const [, setTelemetry] = useState<CarTelemetryType | null>(() => engine.getSelectedTelemetry());
+  const [telemetry, setTelemetry] = useState<CarTelemetryType | null>(() => engine.getSelectedTelemetry());
   const [, setPitPrediction] = useState<PitPrediction | null>(() => engine.calculatePitPrediction('ant'));
   const [raceControlMessages, setRaceControlMessages] = useState<RaceControlMessage[]>(() => engine.getRaceControlMessages());
   const [teamRadios, setTeamRadios] = useState<TeamRadio[]>(() => engine.getTeamRadios());

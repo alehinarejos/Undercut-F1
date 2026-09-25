@@ -1,5 +1,5 @@
 import React from 'react';
-import { Gauge, ChevronLeft, ChevronRight, Zap, Navigation } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Navigation } from 'lucide-react';
 import { TeamLogo } from './TeamLogo';
 import type { LeaderboardEntry, CarTelemetry } from '../types/telemetry';
 
