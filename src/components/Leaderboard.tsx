@@ -177,6 +177,75 @@ function getContrastTextColor(hexColor?: string): string {
   return yiq >= 140 ? '#0a0d14' : '#ffffff';
 }
 
+const VERIFIED_TEAM_COLORS: Record<string, string> = {
+  // Ferrari -> Rosso Corsa
+  LEC: '#E8002D',
+  HAM: '#E8002D',
+  // McLaren -> Papaya Orange
+  NOR: '#FF8000',
+  PIA: '#FF8000',
+  // Mercedes -> Petronas Teal
+  RUS: '#00D2BE',
+  ANT: '#00D2BE',
+  // Aston Martin -> British Racing Green
+  ALO: '#229971',
+  STR: '#229971',
+  // Red Bull Racing -> Deep Navy Blue
+  VER: '#1434CB',
+  HAD: '#1434CB',
+  // Alpine -> BWT Pink (Distinct from blues)
+  GAS: '#FF87BC',
+  COL: '#FF87BC',
+  // Williams -> Williams Cyan / Sky Blue
+  SAI: '#00A0DE',
+  ALB: '#00A0DE',
+  // Racing Bulls -> VCARB Cobalt Blue
+  LAW: '#6692FF',
+  LIN: '#6692FF',
+  // Haas -> Silver Metal
+  OCO: '#B6BABD',
+  BEA: '#B6BABD',
+  // Audi / Sauber -> Neon Fluo Green (Distinct from Ferrari red)
+  HUL: '#52E252',
+  BOR: '#52E252',
+  // Cadillac -> Cadillac Gold (Distinct from Haas silver)
+  PER: '#C8A84E',
+  BOT: '#C8A84E',
+};
+
+const VERIFIED_TEAM_NAME_COLORS: Record<string, string> = {
+  ferrari: '#E8002D',
+  mclaren: '#FF8000',
+  mercedes: '#00D2BE',
+  'aston martin': '#229971',
+  'red bull': '#1434CB',
+  alpine: '#FF87BC',
+  williams: '#00A0DE',
+  'racing bulls': '#6692FF',
+  rb: '#6692FF',
+  vcarb: '#6692FF',
+  haas: '#B6BABD',
+  audi: '#52E252',
+  sauber: '#52E252',
+  cadillac: '#C8A84E',
+};
+
+function getOfficialTeamColor(code?: string, teamName?: string, rawColor?: string): string {
+  if (code && VERIFIED_TEAM_COLORS[code.toUpperCase()]) {
+    return VERIFIED_TEAM_COLORS[code.toUpperCase()];
+  }
+  if (teamName) {
+    const norm = teamName.toLowerCase();
+    for (const [k, v] of Object.entries(VERIFIED_TEAM_NAME_COLORS)) {
+      if (norm.includes(k)) return v;
+    }
+  }
+  if (rawColor && rawColor !== '#' && rawColor !== '#ffffff' && rawColor !== '#fff') {
+    return rawColor;
+  }
+  return '#E8002D';
+}
+
 interface LeaderboardProps {
   entries: LeaderboardEntry[];
   selectedDriverId: string;
@@ -622,6 +691,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
       <div className="leaderboard-body">
         {entries.map((entry, index) => {
           const isSelected = entry.driver.id === selectedDriverId;
+          const teamColor = getOfficialTeamColor(entry.driver.code, entry.driver.team, entry.driver.teamColor);
           const showQ1Divider = isQualifying && index === 15;
           const showQ2Divider = isQualifying && index === 10;
 
@@ -708,8 +778,8 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                 ref={(el) => registerRow(entry.driver.id, el)}
                 className={`leaderboard-row ${isSelected ? 'selected' : ''} ${isDriverInPit ? 'in-pit' : ''} ${entry.isEliminationRisk ? 'elimination-danger' : ''} ${entry.isKnockedOut ? 'knocked-out' : ''} ${isOvertakeUp ? 'overtake-row-up' : ''} ${isOvertakeDown ? 'overtake-row-down' : ''}`}
                 style={{
-                  '--team-color': entry.driver.teamColor || '#ffffff',
-                  borderLeftColor: entry.driver.teamColor || 'rgba(255, 255, 255, 0.2)',
+                  '--team-color': teamColor,
+                  borderLeftColor: teamColor,
                 } as React.CSSProperties}
                 onClick={() => onSelectDriver(entry.driver.id)}
               >
@@ -737,28 +807,18 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                   {!isOvertakeUp && !isOvertakeDown && (entry.previousPosition - entry.position) < 0 && <span style={{ fontSize: '0.48rem', color: '#ff4444', lineHeight: 1 }}>▼</span>}
                 </div>
 
-                {/* 2. DRIVER (Logo + Solid Team Color Driver Chip + Number) */}
-                <div className="cell-driver-with-logo" style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-                  <TeamLogo team={entry.driver.team} color={entry.driver.teamColor} size={22} />
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    minWidth: 0,
-                  }}>
-                    <div
-                      className="driver-team-chip"
-                      style={{
-                        backgroundColor: entry.driver.teamColor || 'var(--f1-red)',
-                        color: getContrastTextColor(entry.driver.teamColor),
-                      }}
-                      title={`${entry.driver.firstName} ${entry.driver.lastName} (${entry.driver.team})`}
-                    >
-                      {entry.driver.code}
-                    </div>
-                    <span className="driver-number-badge">
-                      #{entry.driver.number}
-                    </span>
+                {/* 2. DRIVER (Logo + Solid Team Color Driver Chip) */}
+                <div className="cell-driver-with-logo" style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                  <TeamLogo team={entry.driver.team} color={teamColor} size={24} />
+                  <div
+                    className="driver-team-chip"
+                    style={{
+                      backgroundColor: teamColor,
+                      color: getContrastTextColor(teamColor),
+                    }}
+                    title={`${entry.driver.firstName} ${entry.driver.lastName} (${entry.driver.team})`}
+                  >
+                    {entry.driver.code}
                   </div>
                 </div>
 

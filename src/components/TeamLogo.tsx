@@ -127,9 +127,9 @@ const TEAM_ASSET_MAP: Record<string, {
     src: '/teams/cadillac.png',
     fallbackSvg: (
       <svg viewBox="0 0 32 32" width="100%" height="100%">
-        <rect x="2" y="7" width="28" height="18" rx="3" fill="#111111" stroke="#C0C0C0" strokeWidth="1" />
-        <path d="M7 12l4.5 7L16 14l4.5 5L25 12" fill="none" stroke="#C0C0C0" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
-        <line x1="7" y1="21" x2="25" y2="21" stroke="#E6A100" strokeWidth="1.8" strokeLinecap="round" />
+        <rect x="2" y="7" width="28" height="18" rx="3" fill="#111111" stroke="#C8A84E" strokeWidth="1" />
+        <path d="M7 12l4.5 7L16 14l4.5 5L25 12" fill="none" stroke="#C8A84E" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+        <line x1="7" y1="21" x2="25" y2="21" stroke="#C8A84E" strokeWidth="1.8" strokeLinecap="round" />
       </svg>
     ),
   },
