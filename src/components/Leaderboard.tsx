@@ -161,6 +161,22 @@ function MiniSectorGroup({
   );
 }
 
+function getContrastTextColor(hexColor?: string): string {
+  if (!hexColor) return '#ffffff';
+  let hex = hexColor.replace('#', '').trim();
+  if (hex.length === 3) {
+    hex = hex.split('').map(c => c + c).join('');
+  }
+  if (hex.length !== 6) return '#ffffff';
+  const r = parseInt(hex.substring(0, 2), 16);
+  const g = parseInt(hex.substring(2, 4), 16);
+  const b = parseInt(hex.substring(4, 6), 16);
+  if (isNaN(r) || isNaN(g) || isNaN(b)) return '#ffffff';
+  // ITU-R BT.709 perceived luminance
+  const yiq = (r * 299 + g * 587 + b * 114) / 1000;
+  return yiq >= 140 ? '#0a0d14' : '#ffffff';
+}
+
 interface LeaderboardProps {
   entries: LeaderboardEntry[];
   selectedDriverId: string;
@@ -692,8 +708,9 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                 ref={(el) => registerRow(entry.driver.id, el)}
                 className={`leaderboard-row ${isSelected ? 'selected' : ''} ${isDriverInPit ? 'in-pit' : ''} ${entry.isEliminationRisk ? 'elimination-danger' : ''} ${entry.isKnockedOut ? 'knocked-out' : ''} ${isOvertakeUp ? 'overtake-row-up' : ''} ${isOvertakeDown ? 'overtake-row-down' : ''}`}
                 style={{
+                  '--team-color': entry.driver.teamColor || '#ffffff',
                   borderLeftColor: entry.driver.teamColor || 'rgba(255, 255, 255, 0.2)',
-                }}
+                } as React.CSSProperties}
                 onClick={() => onSelectDriver(entry.driver.id)}
               >
                 {/* 1. POS */}
@@ -720,41 +737,26 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                   {!isOvertakeUp && !isOvertakeDown && (entry.previousPosition - entry.position) < 0 && <span style={{ fontSize: '0.48rem', color: '#ff4444', lineHeight: 1 }}>▼</span>}
                 </div>
 
-                {/* 2. DRIVER (Logo + Team Color Accent Bar + High-Contrast Driver Abbreviation Code + Number) */}
+                {/* 2. DRIVER (Logo + Solid Team Color Driver Chip + Number) */}
                 <div className="cell-driver-with-logo" style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
-                  <TeamLogo team={entry.driver.team} color={entry.driver.teamColor} size={25} />
+                  <TeamLogo team={entry.driver.team} color={entry.driver.teamColor} size={22} />
                   <div style={{
                     display: 'flex',
                     alignItems: 'center',
                     gap: '4px',
                     minWidth: 0,
                   }}>
-                    <span style={{
-                      width: '3px',
-                      height: '16px',
-                      borderRadius: '1.5px',
-                      backgroundColor: entry.driver.teamColor || 'var(--f1-red)',
-                      flexShrink: 0,
-                    }} />
-                    <span className="driver-code" style={{
-                      fontFamily: 'var(--font-display)',
-                      fontWeight: 900,
-                      fontSize: '1.04rem',
-                      color: '#ffffff',
-                      letterSpacing: '0.04em',
-                      lineHeight: 1,
-                      textShadow: '0 1px 3px rgba(0, 0, 0, 0.7)',
-                      flexShrink: 0,
-                    }}>
+                    <div
+                      className="driver-team-chip"
+                      style={{
+                        backgroundColor: entry.driver.teamColor || 'var(--f1-red)',
+                        color: getContrastTextColor(entry.driver.teamColor),
+                      }}
+                      title={`${entry.driver.firstName} ${entry.driver.lastName} (${entry.driver.team})`}
+                    >
                       {entry.driver.code}
-                    </span>
-                    <span style={{
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: '0.64rem',
-                      fontWeight: 700,
-                      color: '#94a3b8',
-                      marginLeft: '1px',
-                    }}>
+                    </div>
+                    <span className="driver-number-badge">
                       #{entry.driver.number}
                     </span>
                   </div>
