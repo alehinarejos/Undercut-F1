@@ -338,15 +338,6 @@ export class TelemetryEngine {
     }
 
     if (savedLiveEntries && savedLiveEntries.length > 0) {
-      // Fix corrupted inPit state where all drivers were marked IN PIT by sessionEnded
-      const inPitCount = savedLiveEntries.filter(e => e.inPit).length;
-      if (inPitCount > 8) {
-        savedLiveEntries.forEach((entry, i) => {
-          entry.inPit = i >= 18;
-          entry.isPitOut = i === 17;
-        });
-      }
-
       // Restore & lock best sector times from savedBestSectors so reloads never reset best sectors
       savedLiveEntries.forEach((entry, idx) => {
         const numStr = String(entry.driver.number);
@@ -994,15 +985,6 @@ export class TelemetryEngine {
               localStorage.removeItem('f1_session_best_sectors_v4');
             } else if (Array.isArray(parsed) && parsed.length > 0 && parsed[0]?.bestLapTime && parsed[0].bestLapTime !== '--:--.---') {
               const sanitized = this.sanitizeDriverRosterInEntries(parsed);
-              const inPitCount = sanitized.filter((e: any) => e && e.inPit).length;
-              if (inPitCount > 8) {
-                sanitized.forEach((e: any, idx: number) => {
-                  if (e) {
-                    e.inPit = idx >= 18;
-                    e.isPitOut = idx === 17;
-                  }
-                });
-              }
               this.leaderboard = sanitized;
               hasSameSessionSavedData = true;
             }
@@ -1640,14 +1622,6 @@ export class TelemetryEngine {
     } else {
       if (this.session.trackStatus === 'CHEQUERED') {
         this.session.trackStatus = 'GREEN';
-      }
-      // Restore normal pit states if all cars were previously parked
-      const inPitCount = this.leaderboard.filter(e => e.inPit).length;
-      if (inPitCount > 8) {
-        this.leaderboard.forEach((e, idx) => {
-          e.inPit = idx >= 18;
-          e.isPitOut = idx === 17;
-        });
       }
     }
   }

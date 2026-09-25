@@ -829,10 +829,15 @@ export class F1LiveWebSocketService {
     };
 
     const rawList = extractItems(data);
+    const seenItemKeys = new Set<string>();
 
     for (const item of rawList) {
       if (!item || typeof item !== 'object' || !item.Message) continue;
-      const rawText = String(item.Message || '');
+      const rawText = String(item.Message || '').trim();
+      const itemKey = `${item.Utc || ''}_${rawText}_${item.Sector || ''}`;
+      if (seenItemKeys.has(itemKey)) continue;
+      seenItemKeys.add(itemKey);
+
       const flagStr = String(item.Flag || '').toUpperCase();
       const catStr = String(item.Category || 'Flag');
 
@@ -860,8 +865,10 @@ export class F1LiveWebSocketService {
         ? new Date(item.Utc).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
         : new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
+      const cleanKey = `${item.Utc || timeStr}_${rawText}`.replace(/[^a-zA-Z0-9]/g, '_');
+
       const parsed: RaceControlMessage = {
-        id: `rc-ws-${item.Utc || Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        id: `rc_${cleanKey}`,
         timestamp: timeStr,
         flag,
         scope: item.Scope || 'Track',
@@ -1518,16 +1525,6 @@ export class F1LiveWebSocketService {
             });
           }
           this.saveBestSectorsToStorage();
-          const inPitCount = cleaned.filter((e: any) => e && e.inPit).length;
-          if (inPitCount > 8) {
-            modified = true;
-            cleaned.forEach((e: any, idx: number) => {
-              if (e) {
-                e.inPit = idx >= 18;
-                e.isPitOut = false;
-              }
-            });
-          }
           if (modified) {
             cleaned.forEach((e, idx) => { e.position = idx + 1; });
             this.saveToStorage(cleaned);

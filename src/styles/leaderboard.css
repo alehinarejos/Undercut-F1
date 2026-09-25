@@ -367,6 +367,13 @@
   letter-spacing: 0.08em;
 }
 
+.cutoff-divider.knocked-out-divider {
+  background: rgba(255, 255, 255, 0.04);
+  border-top: 1px dashed rgba(255, 255, 255, 0.2);
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.5);
+}
+
 .show-desktop {
   display: inline;
 }

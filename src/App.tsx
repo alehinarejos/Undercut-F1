@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { TelemetryEngine } from './services/telemetryEngine';
 import { officialF1Api } from './services/officialF1Api';
 import { f1SignalR } from './services/f1SignalRClient';
@@ -118,6 +118,18 @@ export const App: React.FC = () => {
   const [, setTelemetry] = useState<CarTelemetryType | null>(() => engine.getSelectedTelemetry());
   const [, setPitPrediction] = useState<PitPrediction | null>(() => engine.calculatePitPrediction('ant'));
   const [raceControlMessages, setRaceControlMessages] = useState<RaceControlMessage[]>(() => engine.getRaceControlMessages());
+
+  const appendRaceControlMessage = useCallback((msg: RaceControlMessage) => {
+    setRaceControlMessages(prev => {
+      const isDup = prev.some(m => 
+        m.id === msg.id || 
+        (m.messageEn === msg.messageEn && m.timestamp === msg.timestamp)
+      );
+      if (isDup) return prev;
+      return [msg, ...prev].slice(0, 100);
+    });
+  }, []);
+
   const [teamRadios, setTeamRadios] = useState<TeamRadio[]>(() => engine.getTeamRadios());
 
   // Live connection state
@@ -514,8 +526,10 @@ export const App: React.FC = () => {
           ? new Date(actual.Utc).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
           : new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
+        const cleanKey = `${actual.Utc || timeStr}_${rawText}`.replace(/[^a-zA-Z0-9]/g, '_');
+
         const newMsg: RaceControlMessage = {
-          id: `rc-sig-${actual.Utc || Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          id: `rc_${cleanKey}`,
           timestamp: timeStr,
           flag,
           scope: actual.Scope || 'Track',
@@ -538,7 +552,7 @@ export const App: React.FC = () => {
           }));
         }
 
-        setRaceControlMessages(prev => [newMsg, ...prev.filter(m => m.id !== newMsg.id)]);
+        appendRaceControlMessage(newMsg);
       },
       onClock: (clockData) => {
         if (clockData && typeof clockData === 'object') {
@@ -725,7 +739,7 @@ export const App: React.FC = () => {
           safetyCarDeployed: liveMsg.category === 'SAFETY_CAR',
         }));
       }
-      setRaceControlMessages(prev => [liveMsg, ...prev.filter(m => m.id !== liveMsg.id)]);
+      appendRaceControlMessage(liveMsg);
     });
 
     const unsubscribeCarData = f1LiveWebSocketService.subscribeCarData((carDataMap) => {
@@ -739,7 +753,7 @@ export const App: React.FC = () => {
       unsubscribeRaceControl();
       unsubscribeCarData();
     };
-  }, [engine]);
+  }, [engine, appendRaceControlMessage]);
 
   // Connect listeners and start engine for real telemetry feed
   useEffect(() => {
@@ -764,7 +778,7 @@ export const App: React.FC = () => {
             safetyCarDeployed: msg.category === 'SAFETY_CAR',
           }));
         }
-        setRaceControlMessages(prev => [msg, ...prev.filter(m => m.id !== msg.id)]);
+        appendRaceControlMessage(msg);
       },
       onTeamRadio: (radio) => {
         setTeamRadios(prev => [radio, ...prev]);

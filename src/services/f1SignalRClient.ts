@@ -393,8 +393,13 @@ export class F1SignalRClient {
     };
 
     const rawList = extractItems(data);
+    const seenKeys = new Set<string>();
     for (const item of rawList) {
       if (item && typeof item === 'object') {
+        const rawText = String(item.Message || item.messageEn || '').trim();
+        const key = `${item.Utc || ''}_${rawText}_${item.Sector || ''}`;
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
         this.listeners.onRaceControl?.(item);
       }
     }

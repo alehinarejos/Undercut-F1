@@ -30,6 +30,7 @@ export const RaceControlToast: React.FC<RaceControlToastProps> = ({ messages }) 
   const { language } = useLanguage();
   const [toasts, setToasts] = useState<ActiveToast[]>([]);
   const seenIdsRef = useRef<Set<string>>(new Set());
+  const seenContentRef = useRef<Map<string, number>>(new Map());
   const isInitialMount = useRef<boolean>(true);
 
   // Helper to clean message text if any raw JSON or formatting slipped in
@@ -53,36 +54,54 @@ export const RaceControlToast: React.FC<RaceControlToastProps> = ({ messages }) 
     return txt;
   };
 
+  const getContentKey = (msg: RaceControlMessage): string => {
+    const txt = cleanText(msg.messageEn || msg.messageEs).toUpperCase().trim();
+    return `${txt}_${msg.flag || ''}_${msg.sector || ''}_${msg.category || ''}`;
+  };
+
   // Listen to new messages
   useEffect(() => {
     if (!messages || messages.length === 0) return;
 
+    const now = Date.now();
+
     if (isInitialMount.current) {
-      // On initial page load, record all existing messages so we don't trigger 20 historical toasts
-      messages.forEach(m => seenIdsRef.current.add(m.id));
+      // On initial page load, record all existing messages so we don't trigger historical toasts
+      messages.forEach(m => {
+        seenIdsRef.current.add(m.id);
+        seenContentRef.current.set(getContentKey(m), now);
+      });
       isInitialMount.current = false;
       return;
     }
 
-    // Find genuinely new messages that arrived after mount
+    // Find genuinely new messages that arrived after mount with distinct content
     const newItems: RaceControlMessage[] = [];
     for (const msg of messages) {
-      if (!seenIdsRef.current.has(msg.id)) {
+      const contentKey = getContentKey(msg);
+      const lastSeen = seenContentRef.current.get(contentKey) || 0;
+
+      if (!seenIdsRef.current.has(msg.id) && (now - lastSeen > 12000)) {
         seenIdsRef.current.add(msg.id);
+        seenContentRef.current.set(contentKey, now);
         newItems.push(msg);
+      } else {
+        seenIdsRef.current.add(msg.id);
       }
     }
 
     if (newItems.length > 0) {
-      // Add up to 3 most recent new toasts
-      const toAdd: ActiveToast[] = newItems.slice(0, 3).map(m => ({
+      // Add up to 2 most recent new toasts
+      const toAdd: ActiveToast[] = newItems.slice(0, 2).map(m => ({
         id: m.id,
         message: m,
         addedAt: Date.now(),
       }));
 
       setToasts(prev => {
-        const combined = [...toAdd, ...prev];
+        const existingKeys = new Set(prev.map(t => getContentKey(t.message)));
+        const uniqueToAdd = toAdd.filter(t => !existingKeys.has(getContentKey(t.message)));
+        const combined = [...uniqueToAdd, ...prev];
         return combined.slice(0, 4); // Max 4 on screen at once
       });
     }

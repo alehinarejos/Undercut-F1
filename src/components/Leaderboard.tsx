@@ -496,11 +496,39 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
     return `${String(mins).padStart(2, '0')}:${String(remSecs).padStart(2, '0')}`;
   })();
 
-  // Guard against corrupted all-in-pit states
-  const rawInPitCount = entries.filter(e => e.inPit).length;
-  const shouldSanitizePits = rawInPitCount > 8 && trackStatus !== 'CHEQUERED';
-  const effectiveInPitCount = entries.filter((e, i) => shouldSanitizePits ? i >= 18 : e.inPit).length;
+  // Real on-track vs in-pit counts without artificial overrides
+  const effectiveInPitCount = entries.filter(e => e.inPit).length;
   const effectiveOnTrackCount = Math.max(0, entries.length - effectiveInPitCount);
+
+  // Qualifying cutoff calculations
+  const isQualy = isQualifying || sessionType === 'QUALIFYING' || /qual|clasif/i.test(sessionName || '');
+  const totalCars = entries.length;
+  // In 2026 regulations with 22 cars (11 teams, e.g. Cadillac):
+  // Q1 eliminates 6 cars (P17-P22, top 16 advance) -> cutoff divider before index 16 (P17)
+  // Q2 eliminates 6 cars (P11-P16, top 10 advance) -> cutoff divider before index 10 (P11)
+  // With 20 cars:
+  // Q1 eliminates 5 cars (P16-P20, top 15 advance) -> cutoff divider before index 15 (P16)
+  // Q2 eliminates 5 cars (P11-P15, top 10 advance) -> cutoff divider before index 10 (P11)
+  const q1CutoffIndex = totalCars >= 22 ? 16 : 15;
+  const q2CutoffIndex = 10;
+
+  const sessionNameLower = (sessionName || '').toLowerCase();
+  const isExplicitQ3 = sessionNameLower.includes('q3') || sessionNameLower.includes('qualifying 3') || sessionNameLower.includes('clasificación 3');
+  const isExplicitQ2 = sessionNameLower.includes('q2') || sessionNameLower.includes('qualifying 2') || sessionNameLower.includes('clasificación 2');
+  const isExplicitQ1 = sessionNameLower.includes('q1') || sessionNameLower.includes('qualifying 1') || sessionNameLower.includes('clasificación 1');
+
+  const knockedOutCount = entries.filter(e => e.isKnockedOut).length;
+
+  let qualyPhase: 'Q1' | 'Q2' | 'Q3' = 'Q1';
+  if (isExplicitQ3 || knockedOutCount >= 10) {
+    qualyPhase = 'Q3';
+  } else if (isExplicitQ2 || (knockedOutCount >= 5 && knockedOutCount < 10)) {
+    qualyPhase = 'Q2';
+  } else if (isExplicitQ1 || knockedOutCount < 5) {
+    qualyPhase = 'Q1';
+  } else {
+    qualyPhase = 'Q1';
+  }
 
   return (
     <div className="f1-card leaderboard-container">
@@ -692,8 +720,27 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
         {entries.map((entry, index) => {
           const isSelected = entry.driver.id === selectedDriverId;
           const teamColor = getOfficialTeamColor(entry.driver.code, entry.driver.team, entry.driver.teamColor);
-          const showQ1Divider = isQualifying && index === 15;
-          const showQ2Divider = isQualifying && index === 10;
+
+          // Qualifying cutoffs and state determination:
+          // In Q1: show Q1 elimination line above index q1CutoffIndex (P17 in 22 cars, P16 in 20 cars)
+          const showQ1Divider = isQualy && qualyPhase === 'Q1' && index === q1CutoffIndex;
+          // In Q2: show Q2 elimination line above index q2CutoffIndex (P11)
+          const showQ2Divider = isQualy && qualyPhase === 'Q2' && index === q2CutoffIndex;
+          // In Q2 or Q3: show divider for cars already eliminated in Q1
+          const showEliminatedInQ1Divider = isQualy && (qualyPhase === 'Q2' || qualyPhase === 'Q3') && index === q1CutoffIndex;
+          // In Q3: show divider for cars eliminated in Q2
+          const showEliminatedInQ2Divider = isQualy && qualyPhase === 'Q3' && index === q2CutoffIndex;
+
+          const isEliminationRisk = isQualy && (
+            (qualyPhase === 'Q1' && index >= q1CutoffIndex) ||
+            (qualyPhase === 'Q2' && index >= q2CutoffIndex && index < q1CutoffIndex)
+          );
+
+          const isKnockedOut = Boolean(
+            entry.isKnockedOut ||
+            (isQualy && qualyPhase === 'Q2' && index >= q1CutoffIndex) ||
+            (isQualy && qualyPhase === 'Q3' && index >= q2CutoffIndex)
+          );
 
           const isLeader = index === 0;
           const displayedGap = isLeader ? '—' : (entry.gapToLeader ? entry.gapToLeader.replace('LÍDER', 'LEADER').replace('LIDER', 'LEADER') : '—');
@@ -753,30 +800,46 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
           const hasTyre = Boolean(entry.tyre && entry.tyre.compound);
 
           // Resolve driver pit state accurately (preventing stale IN PIT when on track or OUT LAP)
-          const isDriverPitOut = shouldSanitizePits ? index === 17 : Boolean(entry.isPitOut && !entry.inPit);
-          const isDriverInPit = shouldSanitizePits ? index >= 18 : Boolean(entry.inPit && !entry.isPitOut);
+          const isDriverPitOut = Boolean(entry.isPitOut && !entry.inPit);
+          const isDriverInPit = Boolean(entry.inPit && !entry.isPitOut);
 
           return (
             <React.Fragment key={entry.driver.id}>
-              {/* Qualy Q2 Cutoff */}
+              {/* Qualy Q2 Cutoff (Active during Q2) */}
               {showQ2Divider && (
                 <div className="cutoff-divider">
-                  <span>Q2 ELIMINATION CUTOFF</span>
-                  <span>ELIMINATION</span>
+                  <span>Q2 ELIMINATION CUTOFF (TOP 10 ADVANCE TO Q3)</span>
+                  <span>ELIMINATION ZONE</span>
                 </div>
               )}
 
-              {/* Qualy Q1 Cutoff */}
+              {/* Qualy Q1 Cutoff (Active during Q1) */}
               {showQ1Divider && (
                 <div className="cutoff-divider">
-                  <span>Q1 ELIMINATION CUTOFF</span>
-                  <span>ELIMINATION</span>
+                  <span>Q1 ELIMINATION CUTOFF (TOP {q1CutoffIndex} ADVANCE)</span>
+                  <span>ELIMINATION ZONE</span>
+                </div>
+              )}
+
+              {/* Previously Eliminated in Q2 Divider (shown in Q3) */}
+              {showEliminatedInQ2Divider && (
+                <div className="cutoff-divider knocked-out-divider">
+                  <span>ELIMINATED IN Q2 (P11–P{q1CutoffIndex})</span>
+                  <span>KNOCKED OUT</span>
+                </div>
+              )}
+
+              {/* Previously Eliminated in Q1 Divider (shown in Q2 / Q3) */}
+              {showEliminatedInQ1Divider && (
+                <div className="cutoff-divider knocked-out-divider">
+                  <span>ELIMINATED IN Q1 (P{q1CutoffIndex + 1}–P{totalCars})</span>
+                  <span>KNOCKED OUT</span>
                 </div>
               )}
 
               <div
                 ref={(el) => registerRow(entry.driver.id, el)}
-                className={`leaderboard-row ${isSelected ? 'selected' : ''} ${isDriverInPit ? 'in-pit' : ''} ${entry.isEliminationRisk ? 'elimination-danger' : ''} ${entry.isKnockedOut ? 'knocked-out' : ''} ${isOvertakeUp ? 'overtake-row-up' : ''} ${isOvertakeDown ? 'overtake-row-down' : ''}`}
+                className={`leaderboard-row ${isSelected ? 'selected' : ''} ${isDriverInPit ? 'in-pit' : ''} ${isEliminationRisk ? 'elimination-danger' : ''} ${isKnockedOut ? 'knocked-out' : ''} ${isOvertakeUp ? 'overtake-row-up' : ''} ${isOvertakeDown ? 'overtake-row-down' : ''}`}
                 style={{
                   '--team-color': teamColor,
                   borderLeftColor: teamColor,
