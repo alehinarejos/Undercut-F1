@@ -691,6 +691,9 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
               <div
                 ref={(el) => registerRow(entry.driver.id, el)}
                 className={`leaderboard-row ${isSelected ? 'selected' : ''} ${isDriverInPit ? 'in-pit' : ''} ${entry.isEliminationRisk ? 'elimination-danger' : ''} ${entry.isKnockedOut ? 'knocked-out' : ''} ${isOvertakeUp ? 'overtake-row-up' : ''} ${isOvertakeDown ? 'overtake-row-down' : ''}`}
+                style={{
+                  borderLeftColor: entry.driver.teamColor || 'rgba(255, 255, 255, 0.2)',
+                }}
                 onClick={() => onSelectDriver(entry.driver.id)}
               >
                 {/* 1. POS */}
@@ -717,19 +720,44 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                   {!isOvertakeUp && !isOvertakeDown && (entry.previousPosition - entry.position) < 0 && <span style={{ fontSize: '0.48rem', color: '#ff4444', lineHeight: 1 }}>▼</span>}
                 </div>
 
-                {/* 2. DRIVER (Logo + Driver Abbreviation Code) */}
-                <div className="cell-driver-with-logo" style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
-                  <TeamLogo team={entry.driver.team} color={entry.driver.teamColor} size={30} />
-                  <span className="driver-code" style={{
-                    fontFamily: 'var(--font-display)',
-                    fontWeight: 900,
-                    fontSize: '0.94rem',
-                    color: '#f8fafc',
-                    letterSpacing: '0.04em',
-                    flexShrink: 0,
+                {/* 2. DRIVER (Logo + Team Color Accent Bar + High-Contrast Driver Abbreviation Code + Number) */}
+                <div className="cell-driver-with-logo" style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0 }}>
+                  <TeamLogo team={entry.driver.team} color={entry.driver.teamColor} size={25} />
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    minWidth: 0,
                   }}>
-                    {entry.driver.code}
-                  </span>
+                    <span style={{
+                      width: '3px',
+                      height: '16px',
+                      borderRadius: '1.5px',
+                      backgroundColor: entry.driver.teamColor || 'var(--f1-red)',
+                      flexShrink: 0,
+                    }} />
+                    <span className="driver-code" style={{
+                      fontFamily: 'var(--font-display)',
+                      fontWeight: 900,
+                      fontSize: '1.04rem',
+                      color: '#ffffff',
+                      letterSpacing: '0.04em',
+                      lineHeight: 1,
+                      textShadow: '0 1px 3px rgba(0, 0, 0, 0.7)',
+                      flexShrink: 0,
+                    }}>
+                      {entry.driver.code}
+                    </span>
+                    <span style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '0.64rem',
+                      fontWeight: 700,
+                      color: '#94a3b8',
+                      marginLeft: '1px',
+                    }}>
+                      #{entry.driver.number}
+                    </span>
+                  </div>
                 </div>
 
                 {/* 3. GAP */}
