@@ -1251,3 +1251,153 @@
     gap: 12px;
   }
 }
+
+/* ==========================================================================
+   RESILIENT INTERACTIVE VECTOR WORLD MAP & CIRCUIT OVERLAY FALLBACK
+   ========================================================================== */
+.vector-world-map-wrapper {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  background: radial-gradient(circle at 50% 50%, #0d1527 0%, #050811 100%);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1;
+}
+
+.vector-map-svg {
+  width: 100%;
+  height: 100%;
+  user-select: none;
+}
+
+.vector-map-graticule {
+  stroke: rgba(255, 255, 255, 0.05);
+  stroke-dasharray: 2, 4;
+}
+
+.vector-map-equator {
+  stroke: rgba(0, 215, 182, 0.18);
+  stroke-dasharray: 4, 4;
+}
+
+.vector-map-land {
+  fill: #111a2e;
+  stroke: #1b2947;
+  stroke-width: 1;
+}
+
+.vector-circuit-pin {
+  cursor: pointer;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.vector-circuit-pin:hover {
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.9));
+}
+
+.vector-pin-pulse {
+  animation: vector-pulse-anim 1.8s infinite ease-out;
+  transform-origin: center;
+}
+
+@keyframes vector-pulse-anim {
+  0% {
+    r: 6;
+    opacity: 0.9;
+  }
+  100% {
+    r: 22;
+    opacity: 0;
+  }
+}
+
+.vector-map-tooltip {
+  position: absolute;
+  pointer-events: none;
+  background: rgba(13, 17, 23, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  padding: 8px 12px;
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.85);
+  transform: translate(-50%, -120%);
+  z-index: 50;
+  white-space: nowrap;
+}
+
+.vector-tooltip-title {
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  font-weight: 800;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.vector-tooltip-sub {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-top: 2px;
+}
+
+/* Vector Circuit Mode Overlay */
+.vector-circuit-container {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 40px;
+}
+
+.vector-circuit-svg {
+  width: 100%;
+  max-width: 900px;
+  height: 100%;
+  max-height: 520px;
+  filter: drop-shadow(0 10px 30px rgba(0, 0, 0, 0.7));
+}
+
+.vector-circuit-glow-track {
+  fill: none;
+  stroke: #ff1a1a;
+  stroke-width: 12;
+  stroke-opacity: 0.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: blur(4px);
+}
+
+.vector-circuit-casing-track {
+  fill: none;
+  stroke: #400000;
+  stroke-width: 7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.vector-circuit-main-track {
+  fill: none;
+  stroke: var(--f1-red);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.map-fallback-badge {
+  font-size: 0.64rem;
+  font-weight: 800;
+  color: #00D7B6;
+  background: rgba(0, 215, 182, 0.12);
+  border: 1px solid rgba(0, 215, 182, 0.3);
+  padding: 3px 7px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}

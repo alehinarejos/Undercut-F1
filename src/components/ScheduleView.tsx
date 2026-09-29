@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { 
@@ -31,6 +31,8 @@ export const ScheduleView: React.FC = () => {
   const [selectedRoundForModal, setSelectedRoundForModal] = useState<number | null>(null);
   const [syncState, setSyncState] = useState<ScheduleSyncState>(scheduleSyncService.getState());
   const [mapZoomLevel, setMapZoomLevel] = useState<'circuit' | 'world'>('circuit');
+  const [mapMode, setMapMode] = useState<'mapbox' | 'vector'>(() => MAPBOX_TOKEN ? 'mapbox' : 'vector');
+  const [hoveredPin, setHoveredPin] = useState<{ gp: GrandPrixEvent; x: number; y: number } | null>(null);
 
   useEffect(() => {
     const unsubscribe = scheduleSyncService.subscribe((state) => {
@@ -109,11 +111,11 @@ export const ScheduleView: React.FC = () => {
 
   // Fly to circuit on Map
   const flyToCircuit = useCallback((circuitId: string, zoom = 13.9) => {
-    if (!mapInstanceRef.current) return;
+    setMapZoomLevel('circuit');
+    if (!mapInstanceRef.current || mapMode !== 'mapbox') return;
     const geo = CIRCUIT_GEO_MAP[circuitId];
     if (!geo) return;
 
-    setMapZoomLevel('circuit');
     mapInstanceRef.current.flyTo({
       center: [geo.lng, geo.lat],
       zoom,
@@ -123,12 +125,12 @@ export const ScheduleView: React.FC = () => {
       curve: 1.4,
       essential: true,
     });
-  }, []);
+  }, [mapMode]);
 
   // Fly to world view
   const flyToWorldView = useCallback(() => {
-    if (!mapInstanceRef.current) return;
     setMapZoomLevel('world');
+    if (!mapInstanceRef.current || mapMode !== 'mapbox') return;
     mapInstanceRef.current.flyTo({
       center: [20, 30],
       zoom: 3.2,
@@ -137,32 +139,105 @@ export const ScheduleView: React.FC = () => {
       speed: 1.0,
       essential: true,
     });
-  }, []);
+  }, [mapMode]);
 
-  // Initialize Mapbox Map
+  // Track SVG Path Generator for Vector Mode
+  const trackSvgData = useMemo(() => {
+    const geojson = CIRCUITS_GEOJSON[selectedGp.circuitId];
+    const coords = geojson?.features?.[0]?.geometry?.coordinates as [number, number][] | undefined;
+    if (!coords || coords.length === 0) return null;
+
+    let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+    for (const [lng, lat] of coords) {
+      if (lng < minLng) minLng = lng;
+      if (lng > maxLng) maxLng = lng;
+      if (lat < minLat) minLat = lat;
+      if (lat > maxLat) maxLat = lat;
+    }
+    const lngSpan = (maxLng - minLng) || 0.0001;
+    const latSpan = (maxLat - minLat) || 0.0001;
+    const width = 800;
+    const height = 480;
+    const padding = 60;
+
+    const availableW = width - padding * 2;
+    const availableH = height - padding * 2;
+    const scale = Math.min(availableW / lngSpan, availableH / latSpan);
+    const offsetX = padding + (availableW - lngSpan * scale) / 2;
+    const offsetY = padding + (availableH - latSpan * scale) / 2;
+
+    const points = coords.map(([lng, lat]) => {
+      const x = offsetX + (lng - minLng) * scale;
+      const y = height - (offsetY + (lat - minLat) * scale);
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+
+    const pathD = `M ${points.join(' L ')} Z`;
+    const [firstLng, firstLat] = coords[0];
+    const startX = offsetX + (firstLng - minLng) * scale;
+    const startY = height - (offsetY + (firstLat - minLat) * scale);
+
+    return { pathD, startX, startY, width, height };
+  }, [selectedGp.circuitId]);
+
+  // Initialize Mapbox Map with automatic error and timeout fallback
   useEffect(() => {
-    if (viewMode !== 'map' || !mapContainerRef.current || !MAPBOX_TOKEN) return;
+    if (viewMode !== 'map' || !mapContainerRef.current) return;
+    if (!MAPBOX_TOKEN || mapMode !== 'mapbox') {
+      return;
+    }
 
+    let isMounted = true;
     mapboxgl.accessToken = MAPBOX_TOKEN;
 
     const initialLng = selectedGeo.lng || 49.8533;
     const initialLat = selectedGeo.lat || 40.3725;
 
-    const map = new mapboxgl.Map({
-      container: mapContainerRef.current,
-      style: MAPBOX_STYLE,
-      center: [initialLng, initialLat],
-      zoom: 13.9,
-      pitch: 25,
-      bearing: 0,
-      attributionControl: false,
-    });
+    let map: mapboxgl.Map | null = null;
+    try {
+      map = new mapboxgl.Map({
+        container: mapContainerRef.current,
+        style: MAPBOX_STYLE,
+        center: [initialLng, initialLat],
+        zoom: 13.9,
+        pitch: 25,
+        bearing: 0,
+        attributionControl: false,
+      });
+    } catch (err) {
+      console.warn('[ScheduleView] Mapbox constructor failed, falling back to Vector Map:', err);
+      setMapMode('vector');
+      return;
+    }
 
     mapInstanceRef.current = map;
+
+    map.on('error', (e) => {
+      console.warn('[ScheduleView] Mapbox runtime error, falling back to Vector Map:', e);
+      if (isMounted) setMapMode('vector');
+    });
+
+    // Fallback if Mapbox does not load within 3.5s
+    const loadTimeout = setTimeout(() => {
+      if (mapInstanceRef.current && !mapInstanceRef.current.loaded()) {
+        console.warn('[ScheduleView] Mapbox load timed out, falling back to Vector Map');
+        if (isMounted) setMapMode('vector');
+      }
+    }, 3500);
+
+    // ResizeObserver ensures canvas never stays at 0x0 or distorted when layout changes
+    const resizeObserver = new ResizeObserver(() => {
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.resize();
+      }
+    });
+    resizeObserver.observe(mapContainerRef.current);
 
     map.addControl(new mapboxgl.NavigationControl({ showCompass: true }), 'top-right');
 
     map.on('load', () => {
+      clearTimeout(loadTimeout);
+
       // 1. Add GeoJSON Circuit Track Layer (LineString on Map)
       const initialGeoJson = CIRCUITS_GEOJSON[selectedGp.circuitId] || {
         type: 'FeatureCollection',
@@ -276,16 +351,21 @@ export const ScheduleView: React.FC = () => {
     });
 
     return () => {
+      isMounted = false;
+      clearTimeout(loadTimeout);
+      resizeObserver.disconnect();
       worldMarkersRef.current.forEach(({ marker }) => marker.remove());
       worldMarkersRef.current = [];
       if (activeTrackMarkerRef.current) {
         activeTrackMarkerRef.current.remove();
         activeTrackMarkerRef.current = null;
       }
-      map.remove();
+      if (map) {
+        map.remove();
+      }
       mapInstanceRef.current = null;
     };
-  }, [viewMode]);
+  }, [viewMode, mapMode]);
 
   // Update Track Layer & Active Pin when selectedRound changes
   useEffect(() => {
@@ -423,8 +503,187 @@ export const ScheduleView: React.FC = () => {
       {/* VIEW MODE 1: INTERACTIVE MAPBOX WORLD MAP WITH REAL TRACK OVERLAYS */}
       {viewMode === 'map' ? (
         <div className="schedule-map-wrapper">
-          {/* Mapbox Canvas Container */}
-          <div ref={mapContainerRef} className="schedule-map-container" />
+          {/* Mapbox Canvas Container (Rendered when mapMode === 'mapbox') */}
+          <div 
+            ref={mapContainerRef} 
+            className="schedule-map-container"
+            style={{ display: mapMode === 'mapbox' ? 'block' : 'none' }}
+          />
+
+          {/* Interactive Resilient Vector World Map & Circuit Layout Fallback */}
+          {mapMode === 'vector' && (
+            <div className="vector-world-map-wrapper">
+              {mapZoomLevel === 'world' ? (
+                <svg viewBox="0 0 1000 500" className="vector-map-svg">
+                  <defs>
+                    <radialGradient id="vectorGlow" cx="50%" cy="50%" r="50%">
+                      <stop offset="0%" stopColor="#00D7B6" stopOpacity="0.8" />
+                      <stop offset="100%" stopColor="#00D7B6" stopOpacity="0" />
+                    </radialGradient>
+                    <radialGradient id="activeGlow" cx="50%" cy="50%" r="50%">
+                      <stop offset="0%" stopColor="#e10600" stopOpacity="0.85" />
+                      <stop offset="100%" stopColor="#e10600" stopOpacity="0" />
+                    </radialGradient>
+                  </defs>
+
+                  {/* High-tech telemetry radar grid lines */}
+                  {[-60, -30, 0, 30, 60].map(lat => {
+                    const y = ((90 - lat) / 180) * 500;
+                    return (
+                      <line 
+                        key={lat} 
+                        x1="0" 
+                        y1={y} 
+                        x2="1000" 
+                        y2={y} 
+                        className={lat === 0 ? "vector-map-equator" : "vector-map-graticule"} 
+                      />
+                    );
+                  })}
+                  {[-120, -60, 0, 60, 120].map(lng => {
+                    const x = ((lng + 180) / 360) * 1000;
+                    return (
+                      <line 
+                        key={lng} 
+                        x1={x} 
+                        y1="0" 
+                        x2={x} 
+                        y2="500" 
+                        className="vector-map-graticule" 
+                      />
+                    );
+                  })}
+
+                  {/* Stylized dark continent shapes */}
+                  <g className="vector-map-continents" opacity="0.6">
+                    {/* North America */}
+                    <path className="vector-map-land" d="M 100 80 Q 180 50 280 80 L 295 140 L 260 170 L 220 220 L 250 250 L 210 240 L 160 190 L 90 120 Z" />
+                    {/* South America */}
+                    <path className="vector-map-land" d="M 280 250 L 370 270 L 390 320 L 360 410 L 320 440 L 290 360 L 270 280 Z" />
+                    {/* Europe */}
+                    <path className="vector-map-land" d="M 450 70 L 560 70 L 560 140 L 520 170 L 460 160 L 430 110 Z" />
+                    {/* Africa */}
+                    <path className="vector-map-land" d="M 460 170 L 570 170 L 610 240 L 570 370 L 510 400 L 460 310 L 440 210 Z" />
+                    {/* Asia */}
+                    <path className="vector-map-land" d="M 570 70 L 880 70 L 870 160 L 800 240 L 700 260 L 640 190 L 570 150 Z" />
+                    {/* Australia */}
+                    <path className="vector-map-land" d="M 810 330 L 910 320 L 930 370 L 870 420 L 800 370 Z" />
+                  </g>
+
+                  {/* 24 Circuits Interactive Pins */}
+                  {schedule.map(gp => {
+                    const geo = CIRCUIT_GEO_MAP[gp.circuitId];
+                    if (!geo) return null;
+
+                    const cx = ((geo.lng + 180) / 360) * 1000;
+                    const cy = ((90 - geo.lat) / 180) * 500;
+                    const isDone = isGrandPrixCompleted(gp);
+                    const isNext = gp.round === nextGp.round;
+                    const isSelected = gp.round === selectedRound;
+
+                    return (
+                      <g 
+                        key={gp.round}
+                        className="vector-circuit-pin"
+                        onClick={() => handleSelectGrandPrix(gp)}
+                        onMouseEnter={(e) => {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          setHoveredPin({ gp, x: rect.left + rect.width / 2, y: rect.top });
+                        }}
+                        onMouseLeave={() => setHoveredPin(null)}
+                      >
+                        {/* Pulse ring for Next or Selected GP */}
+                        {(isNext || isSelected) && (
+                          <circle 
+                            cx={cx} 
+                            cy={cy} 
+                            r="12" 
+                            fill="none" 
+                            stroke={isSelected ? "#ffffff" : "var(--f1-red)"} 
+                            strokeWidth="1.5" 
+                            className="vector-pin-pulse" 
+                          />
+                        )}
+
+                        {/* Outer Glow Halo */}
+                        <circle 
+                          cx={cx} 
+                          cy={cy} 
+                          r={isSelected ? 9 : isNext ? 7 : 5} 
+                          fill={isSelected ? "#e10600" : isNext ? "#e10600" : isDone ? "#00D7B6" : "#38bdf8"} 
+                          opacity={isSelected ? 0.95 : 0.8}
+                          stroke="#ffffff"
+                          strokeWidth={isSelected ? 2 : 1}
+                        />
+
+                        {/* Center core */}
+                        <circle 
+                          cx={cx} 
+                          cy={cy} 
+                          r={isSelected ? 3.5 : 2} 
+                          fill="#ffffff" 
+                        />
+                      </g>
+                    );
+                  })}
+                </svg>
+              ) : (
+                /* Vector Circuit Layout View */
+                <div className="vector-circuit-container">
+                  {trackSvgData ? (
+                    <svg viewBox={`0 0 ${trackSvgData.width} ${trackSvgData.height}`} className="vector-circuit-svg">
+                      {/* Outer Glow */}
+                      <path d={trackSvgData.pathD} className="vector-circuit-glow-track" />
+                      {/* Casing */}
+                      <path d={trackSvgData.pathD} className="vector-circuit-casing-track" />
+                      {/* Main Racing Line */}
+                      <path d={trackSvgData.pathD} className="vector-circuit-main-track" />
+                      
+                      {/* Start / Finish line indicator */}
+                      <circle 
+                        cx={trackSvgData.startX} 
+                        cy={trackSvgData.startY} 
+                        r="6" 
+                        fill="#00D7B6" 
+                        stroke="#ffffff" 
+                        strokeWidth="2" 
+                      />
+                      <text 
+                        x={trackSvgData.startX + 10} 
+                        y={trackSvgData.startY + 4} 
+                        fill="#00D7B6" 
+                        fontSize="11" 
+                        fontWeight="800" 
+                        fontFamily="var(--font-mono)"
+                      >
+                        SALIDA / META
+                      </text>
+                    </svg>
+                  ) : (
+                    <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                      Cargando trazado vectorial...
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Pin Tooltip */}
+              {hoveredPin && (
+                <div 
+                  className="vector-map-tooltip"
+                  style={{ left: `${hoveredPin.x}px`, top: `${hoveredPin.y}px` }}
+                >
+                  <div className="vector-tooltip-title">
+                    <span>{hoveredPin.gp.flag}</span>
+                    <span>R{hoveredPin.gp.round}: {hoveredPin.gp.name}</span>
+                  </div>
+                  <div className="vector-tooltip-sub">
+                    {hoveredPin.gp.circuitName} • {hoveredPin.gp.startDate.slice(5)} al {hoveredPin.gp.endDate.slice(5)}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Map View Toggle: Circuit View vs World View */}
           <div className="map-view-controls">
@@ -444,6 +703,19 @@ export const ScheduleView: React.FC = () => {
               <Globe size={13} />
               <span>{t('zoom_world')}</span>
             </button>
+
+            {MAPBOX_TOKEN ? (
+              <button 
+                className="map-control-pill"
+                onClick={() => setMapMode(m => m === 'mapbox' ? 'vector' : 'mapbox')}
+                title={mapMode === 'mapbox' ? "Cambiar a Radar Vectorial" : "Cambiar a Mapbox Satélite"}
+              >
+                <MapIcon size={13} />
+                <span>{mapMode === 'mapbox' ? 'RADAR' : 'MAPBOX'}</span>
+              </button>
+            ) : (
+              <span className="map-fallback-badge">MODO VECTORIAL (RADAR)</span>
+            )}
           </div>
 
           {/* Floating Left Aside: Selected Weekend Schedule & Real Track Overview */}

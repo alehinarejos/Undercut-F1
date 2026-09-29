@@ -301,7 +301,24 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
       }
       result.push(e);
     }
-    return result.map((e, idx) => ({ ...e, position: idx + 1 }));
+    const sorted = [...result].sort((a, b) => {
+      // 1. If positions are valid and distinct, order by real position
+      if (a.position && b.position && a.position !== b.position) {
+        return a.position - b.position;
+      }
+      // 2. In timed sessions (practice/qualy) without distinct position, order by best lap
+      const timeA = parseLapTimeToSec(a.bestLapTime || a.lastLapTime);
+      const timeB = parseLapTimeToSec(b.bestLapTime || b.lastLapTime);
+      if (timeA !== Infinity || timeB !== Infinity) {
+        return timeA - timeB;
+      }
+      return (a.position || 99) - (b.position || 99);
+    });
+
+    return sorted.map((e, idx) => ({
+      ...e,
+      position: e.position || (idx + 1),
+    }));
   }, [rawEntries]);
 
   const [viewMode, setViewMode] = useState<'timing' | 'stints'>('timing');

@@ -43,10 +43,19 @@ export class F1SignalRClient {
   private listeners: F1SignalRListeners = {};
   private reconnectTimeout: number | null = null;
   private pingInterval: number | null = null;
+  private watchdogInterval: number | null = null;
+  private reconnectAttempts = 0;
   private messageBuffer = '';
   private lastStreamPacketTime = 0;
 
-  constructor() {}
+  constructor() {
+    if (typeof window !== 'undefined') {
+      (window as any).__simulateSignalRTimingData = (timingData: any) => {
+        console.info('[F1SignalR] 🧪 Simulating incoming TimingData event:', timingData);
+        this.listeners.onTimingData?.(timingData);
+      };
+    }
+  }
 
   public getLastStreamPacketTime(): number {
     return this.lastStreamPacketTime;
@@ -124,29 +133,40 @@ export class F1SignalRClient {
         console.log('F1 WebSocket cerrado:', ev.code, ev.reason);
         this.cleanup();
         this.updateStatus('disconnected', 'Desconectado');
-        // Auto-reconnect after 8 seconds
-        this.scheduleReconnect(8000);
+        this.scheduleReconnect();
       };
 
     } catch (err: any) {
       console.warn('F1 Connection Error:', err);
       this.cleanup();
       this.updateStatus('error', 'Reintentando...');
-      this.scheduleReconnect(15000);
+      this.scheduleReconnect();
     }
   }
 
-  private scheduleReconnect(delayMs: number) {
+  private scheduleReconnect(explicitDelayMs?: number) {
     if (this.reconnectTimeout) clearTimeout(this.reconnectTimeout);
+    
+    // Exponential backoff with jitter: 2s -> 3.5s -> 6s -> 10s ... max 30s
+    const baseDelay = 2000;
+    const maxDelay = 30000;
+    const factor = Math.min(maxDelay, baseDelay * Math.pow(1.6, this.reconnectAttempts));
+    const jitter = Math.random() * 800;
+    const delay = explicitDelayMs !== undefined ? explicitDelayMs : Math.round(factor + jitter);
+
+    this.reconnectAttempts++;
+    console.info(`[F1SignalR] Programada reconexión en ${(delay / 1000).toFixed(1)}s (intento #${this.reconnectAttempts})`);
+
     this.reconnectTimeout = window.setTimeout(() => {
       this.connect();
-    }, delayMs);
+    }, delay);
   }
 
   /**
    * Process incoming SignalR Core packet chunks separated by record separator \x1E
    */
   private handleIncomingRawMessage(rawData: string) {
+    this.lastStreamPacketTime = Date.now();
     this.messageBuffer += rawData;
     const parts = this.messageBuffer.split('\x1e');
     this.messageBuffer = parts.pop() || ''; // Keep incomplete trailing part
@@ -174,7 +194,9 @@ export class F1SignalRClient {
    * Once handshake is accepted, subscribe to official streaming channels
    */
   private onHandshakeConfirmed() {
+    this.reconnectAttempts = 0;
     this.updateStatus('connected', 'Conectado');
+    this.startWatchdog();
 
     // Subscribe to all official streaming topics
     const subscribeMsg = JSON.stringify({
@@ -405,12 +427,31 @@ export class F1SignalRClient {
     }
   }
 
+  private startWatchdog() {
+    if (this.watchdogInterval) clearInterval(this.watchdogInterval);
+    this.watchdogInterval = window.setInterval(() => {
+      if (this.connectionStatus === 'connected' || this.connectionStatus === 'live_streaming') {
+        const timeSinceLastPacket = Date.now() - this.lastStreamPacketTime;
+        // If connected and no packet or heartbeat received for 35s, cleanly reconnect
+        if (this.lastStreamPacketTime > 0 && timeSinceLastPacket > 35000) {
+          console.warn(`[F1SignalR] Watchdog: No se recibieron paquetes durante ${(timeSinceLastPacket / 1000).toFixed(0)}s. Reconectando...`);
+          this.cleanup();
+          this.scheduleReconnect(1000);
+        }
+      }
+    }, 10000);
+  }
+
   public disconnect() {
     this.cleanup();
     this.updateStatus('disconnected', 'Desconectado manualmente');
   }
 
   private cleanup() {
+    if (this.watchdogInterval) {
+      clearInterval(this.watchdogInterval);
+      this.watchdogInterval = null;
+    }
     if (this.reconnectTimeout) {
       clearTimeout(this.reconnectTimeout);
       this.reconnectTimeout = null;

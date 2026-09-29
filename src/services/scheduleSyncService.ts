@@ -89,6 +89,10 @@ class ScheduleSyncService {
     this.listeners.forEach(l => l(this.state));
   }
 
+  public notifyStateChanged() {
+    this.notify();
+  }
+
   public checkWeeklyScheduleIfNeeded(): void {
     const lastCheckTime = this.state.lastWeeklyCheck?.getTime() || 0;
     const now = Date.now();
@@ -415,11 +419,36 @@ export interface GrandPrixTimeline {
   allCompleted: boolean;
 }
 
+// ── MOCK DATE OVERRIDE HOOK (For Testing & Verification) ──
+let mockDateOffsetMs: number | null = null;
+
+export function setMockF1Date(targetDate: string | number | null): void {
+  if (!targetDate) {
+    mockDateOffsetMs = null;
+    console.info('[ScheduleSync] Reset to real system clock');
+  } else {
+    const targetMs = typeof targetDate === 'number' ? targetDate : new Date(targetDate).getTime();
+    if (!isNaN(targetMs)) {
+      mockDateOffsetMs = targetMs - Date.now();
+      console.info(`[ScheduleSync] ⏱️ Mock date set to: ${new Date(targetMs).toISOString()}`);
+    }
+  }
+  scheduleSyncService.notifyStateChanged();
+}
+
+export function getEffectiveNowMs(): number {
+  return mockDateOffsetMs !== null ? Date.now() + mockDateOffsetMs : Date.now();
+}
+
+if (typeof window !== 'undefined') {
+  (window as any).__setMockF1Date = setMockF1Date;
+}
+
 /**
  * Computes exact state for every session of a Grand Prix (completed, live, next upcoming, future)
  */
-export function getGrandPrixTimeline(gp: GrandPrixEvent): GrandPrixTimeline {
-  const now = Date.now();
+export function getGrandPrixTimeline(gp: GrandPrixEvent, referenceNowMs: number = getEffectiveNowMs()): GrandPrixTimeline {
+  const now = referenceNowMs;
   let activeSession: SessionTimelineInfo | null = null;
   let lastCompletedSession: SessionTimelineInfo | null = null;
   let nextSession: SessionTimelineInfo | null = null;
@@ -434,8 +463,6 @@ export function getGrandPrixTimeline(gp: GrandPrixEvent): GrandPrixTimeline {
     const endTime = !isNaN(explicitEnd) ? explicitEnd : (!isNaN(startTime) ? startTime + durationMs : NaN);
 
     let status: SessionStateKind = 'future';
-    // A session is only truly 'completed' if its end time has genuinely passed,
-    // regardless of any runtime-set completed flag (which may be stale WebSocket data).
     if (!isNaN(startTime) && !isNaN(endTime)) {
       if (now >= startTime && now < endTime) {
         status = 'live';
@@ -485,26 +512,62 @@ export function getGrandPrixTimeline(gp: GrandPrixEvent): GrandPrixTimeline {
 /**
  * Robust check if a Grand Prix has already completed based on explicit flag or if the Race has ended
  */
-export function isGrandPrixCompleted(gp: GrandPrixEvent): boolean {
+export function isGrandPrixCompleted(gp: GrandPrixEvent, referenceNowMs: number = getEffectiveNowMs()): boolean {
   if (gp.completed) return true;
   const raceSession = gp.sessions.find(s => s.type === 'Race');
   if (raceSession?.startTimeUtc) {
     const raceStart = new Date(raceSession.startTimeUtc).getTime();
     if (!isNaN(raceStart)) {
       // Completed if 3.5 hours after race start time
-      return Date.now() > (raceStart + 3.5 * 3600 * 1000);
+      return referenceNowMs > (raceStart + 3.5 * 3600 * 1000);
     }
   }
   const end = new Date(`${gp.endDate}T23:59:59Z`).getTime();
-  return !isNaN(end) && Date.now() > end;
+  return !isNaN(end) && referenceNowMs > end;
 }
 
 /**
  * Returns the actual next upcoming Grand Prix where the race is still in the future
  */
-export function getNextUpcomingGrandPrix(schedule: GrandPrixEvent[]): GrandPrixEvent {
-  const upcoming = schedule.find(gp => !isGrandPrixCompleted(gp));
+export function getNextUpcomingGrandPrix(schedule: GrandPrixEvent[], referenceNowMs: number = getEffectiveNowMs()): GrandPrixEvent {
+  const upcoming = schedule.find(gp => !isGrandPrixCompleted(gp, referenceNowMs));
   return upcoming || schedule[schedule.length - 1];
+}
+
+/**
+ * Pure function: Dynamically resolves active session or upcoming Grand Prix based on UTC timestamp
+ */
+export function resolveCurrentOrNextGrandPrix(
+  schedule: GrandPrixEvent[],
+  referenceNowMs: number = getEffectiveNowMs()
+): {
+  gp: GrandPrixEvent;
+  activeSession: SessionSchedule | null;
+  isLive: boolean;
+  remainingSec: number;
+} {
+  // 1. Check if any session across any GP is currently LIVE
+  for (const gp of schedule) {
+    const timeline = getGrandPrixTimeline(gp, referenceNowMs);
+    if (timeline.activeSession) {
+      const remainingSec = Math.max(0, Math.round((timeline.activeSession.endTime - referenceNowMs) / 1000));
+      return {
+        gp,
+        activeSession: timeline.activeSession.session,
+        isLive: true,
+        remainingSec,
+      };
+    }
+  }
+
+  // 2. If no session is live, select the next uncompleted Grand Prix
+  const nextGp = getNextUpcomingGrandPrix(schedule, referenceNowMs);
+  return {
+    gp: nextGp,
+    activeSession: null,
+    isLive: false,
+    remainingSec: 0,
+  };
 }
 
 /**
@@ -529,7 +592,7 @@ export function getRaceTargetTimestamp(gp: GrandPrixEvent): number {
 /**
  * Computes remaining time breakdown (days, hours, minutes, seconds)
  */
-export function getTimeRemaining(targetDateMs: number, nowMs: number = Date.now()) {
+export function getTimeRemaining(targetDateMs: number, nowMs: number = getEffectiveNowMs()) {
   const diff = Math.max(0, targetDateMs - nowMs);
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
   const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));

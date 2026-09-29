@@ -165,17 +165,17 @@ export class TelemetryEngine {
   private sessionBestS2: number = 41.085;
   private sessionBestS3: number = 25.380;
 
-  constructor(circuitId: string = 'baku') {
+  constructor(circuitId?: string) {
     const activeGp = getNextUpcomingGrandPrix(scheduleSyncService.getState().schedule);
-    const resolvedId = circuitId === 'madrid' && activeGp?.circuitId ? activeGp.circuitId : circuitId;
-    const selectedCircuit = CIRCUIT_MAP.get(resolvedId) || CIRCUIT_MAP.get('baku') || CIRCUITS[0];
+    const targetId = circuitId || activeGp?.circuitId || 'baku';
+    const selectedCircuit = CIRCUIT_MAP.get(targetId) || CIRCUIT_MAP.get(activeGp?.circuitId || '') || CIRCUIT_MAP.get('baku') || CIRCUITS[0];
     this.circuit = selectedCircuit;
 
     this.session = {
-      id: `session-2026-r${activeGp?.round || 17}-fp1`,
+      id: `session-2026-r${activeGp?.round || 1}-fp1`,
       circuit: this.circuit,
       type: 'PRACTICE',
-      name: `${activeGp?.name || 'GP de Azerbaiyán'} - Libres 1 (FP1)`,
+      name: `${activeGp?.name || this.circuit.name} - Libres 1 (FP1)`,
       trackStatus: 'GREEN',
       currentLap: 0,
       totalLaps: 0,
@@ -192,21 +192,37 @@ export class TelemetryEngine {
       drsEnabled: true,
     };
 
-    if (circuitId === 'madrid' || circuitId === 'baku' || this.circuit.id === 'baku') {
-      this.loadMadridSession();
-    } else {
-      this.loadOfficialRecordedSession(15);
-    }
+    this.loadMadridSession(this.circuit.id);
     this.start();
+
+    if (typeof window !== 'undefined') {
+      (window as any).__simulateOvertake = (driverCode1: string, driverCode2: string) => {
+        const idx1 = this.leaderboard.findIndex(e => e.driver.code.toUpperCase() === driverCode1.toUpperCase());
+        const idx2 = this.leaderboard.findIndex(e => e.driver.code.toUpperCase() === driverCode2.toUpperCase());
+        if (idx1 !== -1 && idx2 !== -1) {
+          const pos1 = this.leaderboard[idx1].position;
+          const pos2 = this.leaderboard[idx2].position;
+          this.leaderboard[idx1].previousPosition = pos1;
+          this.leaderboard[idx2].previousPosition = pos2;
+          this.leaderboard[idx1].position = pos2;
+          this.leaderboard[idx2].position = pos1;
+          this.leaderboard.sort((a, b) => a.position - b.position);
+          this.emitCurrentState();
+          console.info(`[TelemetryEngine] ⚡ Simulated overtake: ${driverCode1} (P${pos2}) vs ${driverCode2} (P${pos1})`);
+        } else {
+          console.warn(`[TelemetryEngine] Driver codes not found: ${driverCode1}, ${driverCode2}`);
+        }
+      };
+    }
   }
 
   /**
-   * Load current active weekend latest session (e.g., GP de Azerbaiyán - Baku FP1)
+   * Load active or upcoming weekend session dynamically scaled for the selected circuit
    */
-  public loadMadridSession() {
+  public loadMadridSession(targetCircuitId?: string) {
     const activeGp = getNextUpcomingGrandPrix(scheduleSyncService.getState().schedule);
-    const activeCircuitId = activeGp?.circuitId || 'baku';
-    const activeCircuit = CIRCUIT_MAP.get(activeCircuitId) || CIRCUIT_MAP.get('baku') || CIRCUITS[0];
+    const activeCircuitId = targetCircuitId || activeGp?.circuitId || 'baku';
+    const activeCircuit = CIRCUIT_MAP.get(activeCircuitId) || CIRCUIT_MAP.get(activeGp?.circuitId || '') || CIRCUIT_MAP.get('baku') || CIRCUITS[0];
     this.circuit = activeCircuit;
 
     const timeline = getGrandPrixTimeline(activeGp);
@@ -217,9 +233,11 @@ export class TelemetryEngine {
     const currentSessionKey = `${activeCircuitId}-${sessCode}-${sessObj?.startTimeUtc || 'default'}`;
     const isPractice2 = /fp2|practice 2|libres 2/i.test(sessTypeLabel) || sessCode === 'FP2';
 
-    this.sessionBestS1 = isPractice2 ? 35.790 : 35.840;
-    this.sessionBestS2 = isPractice2 ? 41.045 : 41.085;
-    this.sessionBestS3 = isPractice2 ? 25.345 : 25.380;
+    // Calculate baseline lap time and sector benchmarks scaled to circuit length (~18.2s per km)
+    const lapPaceSec = Math.max(68, Math.round((activeCircuit.lengthKm || 5.0) * 18.2 * 10) / 10);
+    this.sessionBestS1 = Number(((lapPaceSec * 0.35) + (isPractice2 ? -0.05 : 0)).toFixed(3));
+    this.sessionBestS2 = Number(((lapPaceSec * 0.40) + (isPractice2 ? -0.04 : 0)).toFixed(3));
+    this.sessionBestS3 = Number(((lapPaceSec * 0.25) + (isPractice2 ? -0.035 : 0)).toFixed(3));
 
     const initialRemSec = timeline.activeSession
       ? Math.max(60, Math.floor((timeline.activeSession.endTime - Date.now()) / 1000))
@@ -229,7 +247,7 @@ export class TelemetryEngine {
       id: currentSessionKey,
       circuit: activeCircuit,
       type: sessCode === 'Race' ? 'RACE' : sessCode === 'Sprint' ? 'SPRINT' : (sessCode === 'Qualifying' || sessCode === 'Sprint Qualifying') ? 'QUALIFYING' : 'PRACTICE',
-      name: `${activeGp?.name || 'GP de Azerbaiyán'} - ${sessTypeLabel}`,
+      name: `${activeGp?.name || activeCircuit.name} - ${sessTypeLabel}`,
       trackStatus: timeline.activeSession ? 'GREEN' : 'CHEQUERED',
       currentLap: 0,
       totalLaps: 0,
@@ -247,32 +265,31 @@ export class TelemetryEngine {
     };
     this.sessionEnded = !timeline.activeSession && Boolean(timeline.lastCompletedSession);
 
-    // Official latest session times for Baku City Circuit (6.003 km lap)
-    // Distinct benchmark sets per session so FP2 does not show FP1 times
+    // Realistic lap times scaled per driver
     const offset = isPractice2 ? -0.160 : 0;
     const baseLapTimes = [
-      Number((102.340 + offset).toFixed(3)),
-      Number((102.465 + offset).toFixed(3)),
-      Number((102.590 + offset).toFixed(3)),
-      Number((102.675 + offset).toFixed(3)),
-      Number((102.740 + offset).toFixed(3)),
-      Number((102.880 + offset).toFixed(3)),
-      Number((103.020 + offset).toFixed(3)),
-      Number((103.110 + offset).toFixed(3)),
-      Number((103.205 + offset).toFixed(3)),
-      Number((103.290 + offset).toFixed(3)),
-      Number((103.440 + offset).toFixed(3)),
-      Number((103.520 + offset).toFixed(3)),
-      Number((103.610 + offset).toFixed(3)),
-      Number((103.705 + offset).toFixed(3)),
-      Number((103.810 + offset).toFixed(3)),
-      Number((103.930 + offset).toFixed(3)),
-      Number((104.060 + offset).toFixed(3)),
-      Number((104.190 + offset).toFixed(3)),
-      Number((104.320 + offset).toFixed(3)),
-      Number((104.470 + offset).toFixed(3)),
-      Number((104.640 + offset).toFixed(3)),
-      Number((104.850 + offset).toFixed(3)),
+      Number((lapPaceSec + 0.120 + offset).toFixed(3)),
+      Number((lapPaceSec + 0.245 + offset).toFixed(3)),
+      Number((lapPaceSec + 0.370 + offset).toFixed(3)),
+      Number((lapPaceSec + 0.455 + offset).toFixed(3)),
+      Number((lapPaceSec + 0.520 + offset).toFixed(3)),
+      Number((lapPaceSec + 0.660 + offset).toFixed(3)),
+      Number((lapPaceSec + 0.800 + offset).toFixed(3)),
+      Number((lapPaceSec + 0.890 + offset).toFixed(3)),
+      Number((lapPaceSec + 0.985 + offset).toFixed(3)),
+      Number((lapPaceSec + 1.070 + offset).toFixed(3)),
+      Number((lapPaceSec + 1.220 + offset).toFixed(3)),
+      Number((lapPaceSec + 1.300 + offset).toFixed(3)),
+      Number((lapPaceSec + 1.390 + offset).toFixed(3)),
+      Number((lapPaceSec + 1.485 + offset).toFixed(3)),
+      Number((lapPaceSec + 1.590 + offset).toFixed(3)),
+      Number((lapPaceSec + 1.710 + offset).toFixed(3)),
+      Number((lapPaceSec + 1.840 + offset).toFixed(3)),
+      Number((lapPaceSec + 1.970 + offset).toFixed(3)),
+      Number((lapPaceSec + 2.100 + offset).toFixed(3)),
+      Number((lapPaceSec + 2.250 + offset).toFixed(3)),
+      Number((lapPaceSec + 2.420 + offset).toFixed(3)),
+      Number((lapPaceSec + 2.630 + offset).toFixed(3)),
     ];
 
     const speedTraps = [
@@ -881,6 +898,10 @@ export class TelemetryEngine {
     });
   }
 
+  public getCircuit(): CircuitInfo {
+    return this.circuit;
+  }
+
   public setCircuit(circuitId: string) {
     const circuit = CIRCUIT_MAP.get(circuitId);
     if (!circuit) return;
@@ -888,6 +909,8 @@ export class TelemetryEngine {
     this.session.circuit = circuit;
     this.session.totalLaps = circuit.laps;
     this.session.name = `Gran Premio de ${circuit.country}`;
+    this.loadMadridSession(circuit.id);
+    this.emitCurrentState();
   }
 
   public setSessionType(type: SessionState['type']) {
@@ -2005,17 +2028,20 @@ export class TelemetryEngine {
       this.telemetryMap.set(entry.driver.id, telemetry);
     });
 
-    if (!isLive) {
-      const isPracticeOrQualy = this.session.type === 'PRACTICE' || this.session.type === 'QUALIFYING';
+    const isPracticeOrQualy = this.session.type === 'PRACTICE' || this.session.type === 'QUALIFYING';
 
-      if (isPracticeOrQualy) {
-        // In Practice and Qualifying: Order by best lap time
-        this.leaderboard.sort((a, b) => {
-          const timeA = a.lastLapTimeNum || this.parseLapTimeToSeconds(a.bestLapTime);
-          const timeB = b.lastLapTimeNum || this.parseLapTimeToSeconds(b.bestLapTime);
-          return timeA - timeB;
-        });
+    if (isPracticeOrQualy) {
+      // In Practice and Qualifying: Order by best lap time (or official positions if live)
+      this.leaderboard.sort((a, b) => {
+        if (isLive && a.position && b.position && a.position !== b.position) {
+          return a.position - b.position;
+        }
+        const timeA = a.lastLapTimeNum || this.parseLapTimeToSeconds(a.bestLapTime);
+        const timeB = b.lastLapTimeNum || this.parseLapTimeToSeconds(b.bestLapTime);
+        return timeA - timeB;
+      });
 
+      if (!isLive) {
         const leaderTime = this.leaderboard[0]?.lastLapTimeNum || this.parseLapTimeToSeconds(this.leaderboard[0]?.bestLapTime) || 94.077;
 
         this.leaderboard.forEach((entry, i) => {
@@ -2036,51 +2062,53 @@ export class TelemetryEngine {
             entry.gapToAhead = `+${intervalSec.toFixed(3)}s`;
           }
         });
-      } else {
-      // In Race: Preserve on-track race order and calculate race distance intervals
+      }
+    } else {
+      // In Race / Sprint: Sort by position
       this.leaderboard.sort((a, b) => a.position - b.position);
 
-      let cumulativeGap = 0;
-      this.leaderboard.forEach((entry, i) => {
-        if (entry.gapToLeader === 'DNF' || entry.gapToAhead === 'DNF') {
-          entry.gapToAhead = 'DNF';
-          entry.gapToLeader = 'DNF';
-          return;
-        }
-        if (i === 0) {
-          entry.gapToLeader = this.session.trackStatus === 'CHEQUERED' ? 'GANADOR' : 'LÍDER';
-          entry.gapToAhead = 'LEADER';
-          cumulativeGap = 0;
-        } else {
-          const delta = (Math.sin(Date.now() / 1400 + i * 1.5) * 0.003 + (Math.random() * 0.004 - 0.002)) * dt * this.playbackSpeed;
-          const currentInterval = Math.max(0.08, (entry.intervalNum || 1.1) + delta);
-          entry.intervalNum = currentInterval;
-
-          const isLappedByLeader = entry.gapToLeader.toUpperCase().includes('LAP');
-          const isLappedByAhead = entry.gapToAhead.toUpperCase().includes('LAP');
-
-          // Interval to car ahead
-          if (isLappedByAhead) {
-            if (entry.gapToAhead.toUpperCase().includes('1 LAP') || entry.gapToAhead.toUpperCase().includes('1LAP')) {
-              entry.gapToAhead = '+1 LAP';
-            }
-          } else {
-            entry.gapToAhead = `+${currentInterval.toFixed(3)}s`;
+      if (!isLive) {
+        let cumulativeGap = 0;
+        this.leaderboard.forEach((entry, i) => {
+          if (entry.gapToLeader === 'DNF' || entry.gapToAhead === 'DNF') {
+            entry.gapToAhead = 'DNF';
+            entry.gapToLeader = 'DNF';
+            return;
           }
+          if (i === 0) {
+            entry.gapToLeader = this.session.trackStatus === 'CHEQUERED' ? 'GANADOR' : 'LÍDER';
+            entry.gapToAhead = 'LEADER';
+            cumulativeGap = 0;
+          } else {
+            const delta = (Math.sin(Date.now() / 1400 + i * 1.5) * 0.003 + (Math.random() * 0.004 - 0.002)) * dt * this.playbackSpeed;
+            const currentInterval = Math.max(0.08, (entry.intervalNum || 1.1) + delta);
+            entry.intervalNum = currentInterval;
 
-          // Distance to leader
-          if (isLappedByLeader) {
-            if (entry.gapToLeader.toUpperCase().includes('2 LAP')) {
-              entry.gapToLeader = '+2 LAPS';
+            const isLappedByLeader = entry.gapToLeader.toUpperCase().includes('LAP');
+            const isLappedByAhead = entry.gapToAhead.toUpperCase().includes('LAP');
+
+            // Interval to car ahead
+            if (isLappedByAhead) {
+              if (entry.gapToAhead.toUpperCase().includes('1 LAP') || entry.gapToAhead.toUpperCase().includes('1LAP')) {
+                entry.gapToAhead = '+1 LAP';
+              }
             } else {
-              entry.gapToLeader = '+1 LAP';
+              entry.gapToAhead = `+${currentInterval.toFixed(3)}s`;
             }
-          } else {
-            cumulativeGap += currentInterval;
-            entry.gapToLeader = `+${cumulativeGap.toFixed(3)}s`;
+
+            // Distance to leader
+            if (isLappedByLeader) {
+              if (entry.gapToLeader.toUpperCase().includes('2 LAP')) {
+                entry.gapToLeader = '+2 LAPS';
+              } else {
+                entry.gapToLeader = '+1 LAP';
+              }
+            } else {
+              cumulativeGap += currentInterval;
+              entry.gapToLeader = `+${cumulativeGap.toFixed(3)}s`;
+            }
           }
-        }
-      });
+        });
       }
     }
 
@@ -2180,29 +2208,36 @@ export class TelemetryEngine {
         hasNewLapOrSector = true;
       }
 
-      // Update Sectors
-      if (Array.isArray(lineData.Sectors)) {
-        if (lineData.Sectors[0]?.Value) {
-          entry.s1Time = lineData.Sectors[0].Value;
+      // Update Sectors (F1 SignalR sends Sectors as Dictionary { "0": {...}, "1": {...} } or Array)
+      const rawSectors = lineData.Sectors;
+      const sectorsList: any[] = Array.isArray(rawSectors)
+        ? rawSectors
+        : (rawSectors && typeof rawSectors === 'object')
+        ? [rawSectors['0'] || rawSectors[0], rawSectors['1'] || rawSectors[1], rawSectors['2'] || rawSectors[2]]
+        : [];
+
+      if (sectorsList.length > 0) {
+        if (sectorsList[0]?.Value) {
+          entry.s1Time = sectorsList[0].Value;
           hasNewLapOrSector = true;
         }
-        if (lineData.Sectors[1]?.Value) {
-          entry.s2Time = lineData.Sectors[1].Value;
+        if (sectorsList[1]?.Value) {
+          entry.s2Time = sectorsList[1].Value;
           hasNewLapOrSector = true;
         }
-        if (lineData.Sectors[2]?.Value) {
-          entry.s3Time = lineData.Sectors[2].Value;
+        if (sectorsList[2]?.Value) {
+          entry.s3Time = sectorsList[2].Value;
           hasNewLapOrSector = true;
         }
 
-        if (lineData.Sectors[0]?.OverallFastest) entry.s1Status = 'purple';
-        else if (lineData.Sectors[0]?.PersonalFastest) entry.s1Status = 'green';
+        if (sectorsList[0]?.OverallFastest) entry.s1Status = 'purple';
+        else if (sectorsList[0]?.PersonalFastest) entry.s1Status = 'green';
 
-        if (lineData.Sectors[1]?.OverallFastest) entry.s2Status = 'purple';
-        else if (lineData.Sectors[1]?.PersonalFastest) entry.s2Status = 'green';
+        if (sectorsList[1]?.OverallFastest) entry.s2Status = 'purple';
+        else if (sectorsList[1]?.PersonalFastest) entry.s2Status = 'green';
 
-        if (lineData.Sectors[2]?.OverallFastest) entry.s3Status = 'purple';
-        else if (lineData.Sectors[2]?.PersonalFastest) entry.s3Status = 'green';
+        if (sectorsList[2]?.OverallFastest) entry.s3Status = 'purple';
+        else if (sectorsList[2]?.PersonalFastest) entry.s3Status = 'green';
       }
 
       // Pit Stops & InPit status (mutually exclusive & cleared when setting flying sectors)

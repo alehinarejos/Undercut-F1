@@ -46,10 +46,20 @@ export const OfficialLeaderboardView: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // Compute analytics dynamically when live standings sync
+  // Listen for dynamic race results events to refresh analytics immediately
+  const [resultsRevision, setResultsRevision] = useState(0);
+  useEffect(() => {
+    const handleUpdate = () => {
+      setResultsRevision(r => r + 1);
+    };
+    window.addEventListener('f1:results_updated', handleUpdate);
+    return () => window.removeEventListener('f1:results_updated', handleUpdate);
+  }, []);
+
+  // Compute analytics dynamically when live standings sync or dynamic race results are registered
   const analytics: DriverStandingsAnalyticsData = useMemo(() => {
     return computeDriverStandingsAnalytics(syncState.drivers);
-  }, [syncState.drivers]);
+  }, [syncState.drivers, resultsRevision]);
 
   // Initialize visible drivers with top 10 or all
   useEffect(() => {
@@ -111,13 +121,22 @@ export const OfficialLeaderboardView: React.FC = () => {
   const numRounds = analytics.rounds.length;
 
   const getX = (roundIdx: number) => {
-    if (numRounds <= 1) return paddingLeft;
+    if (numRounds <= 1) return paddingLeft + innerWidth / 2;
     return paddingLeft + (roundIdx / (numRounds - 1)) * innerWidth;
   };
 
+  const maxPointsCeil = Math.max(Math.ceil((analytics.maxPoints + 20) / 50) * 50, 100);
+  const yPointsSteps = useMemo(() => {
+    const step = maxPointsCeil <= 150 ? 25 : maxPointsCeil <= 300 ? 50 : 100;
+    const steps: number[] = [];
+    for (let p = 0; p <= maxPointsCeil; p += step) {
+      steps.push(p);
+    }
+    return steps;
+  }, [maxPointsCeil]);
+
   const getYPoints = (pts: number) => {
-    const maxP = Math.max(analytics.maxPoints, 270);
-    return paddingTop + (1 - pts / maxP) * innerHeight;
+    return paddingTop + (1 - pts / maxPointsCeil) * innerHeight;
   };
 
   // Card 2: Ranking Evolution (Bump chart) dimensions
@@ -401,7 +420,7 @@ export const OfficialLeaderboardView: React.FC = () => {
                   </defs>
 
                   {/* Horizontal Grid lines & Y-Axis Labels */}
-                  {[0, 50, 100, 150, 200, 250].map(pt => {
+                  {yPointsSteps.map(pt => {
                     const y = getYPoints(pt);
                     return (
                       <g key={pt}>

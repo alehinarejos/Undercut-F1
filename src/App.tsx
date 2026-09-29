@@ -400,6 +400,12 @@ export const App: React.FC = () => {
         setIsOfficialLive(false);
         removeLiveSessionSchema(); // remove LiveBlogPosting when no session is active
 
+        // Dynamically synchronize the circuit and session with the current upcoming Grand Prix
+        if (upcomingGp?.circuitId && engine.getCircuit().id !== upcomingGp.circuitId) {
+          engine.setCircuit(upcomingGp.circuitId);
+          setSession(engine.getSession());
+        }
+
         if (isRecentlyFinished) {
           const finishedAt = lastComp?.endTime || nowMs;
           const sessName = lastComp ? `${upcomingGp.name} - ${lastComp.session.name}` : undefined;
