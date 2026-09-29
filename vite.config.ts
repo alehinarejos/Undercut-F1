@@ -32,6 +32,11 @@ export default defineConfig({
           'User-Agent': 'BestHTTP',
         },
       },
+      '/jolpica-api': {
+        target: 'https://api.jolpi.ca/ergast/f1',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/jolpica-api/, ''),
+      },
     },
   },
 })

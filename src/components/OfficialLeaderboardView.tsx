@@ -14,6 +14,7 @@ import type { StandingsSyncState } from '../services/standingsSyncService';
 import { computeDriverStandingsAnalytics } from '../services/driverStandingsAnalytics';
 import type { DriverStandingsAnalyticsData } from '../services/driverStandingsAnalytics';
 import { TeamLogo } from './TeamLogo';
+import { DriverStandingsChart } from './DriverStandingsChart';
 import { useLanguage } from '../context/LanguageContext';
 import '../styles/driver-standings.css';
 
@@ -24,17 +25,7 @@ export const OfficialLeaderboardView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isDriverFilterOpen, setIsDriverFilterOpen] = useState<boolean>(false);
   const [visibleDriverCodes, setVisibleDriverCodes] = useState<Set<string>>(new Set());
-
-  // Tooltip state for SVG charts
-  const [hoveredPoint, setHoveredPoint] = useState<{
-    x: number;
-    y: number;
-    roundName: string;
-    driverName: string;
-    team: string;
-    points: number;
-    rank?: number;
-  } | null>(null);
+  const [hasInitializedSelection, setHasInitializedSelection] = useState<boolean>(false);
 
   // Standings data from sync service
   const [syncState, setSyncState] = useState<StandingsSyncState>(standingsSyncService.getState());
@@ -58,22 +49,34 @@ export const OfficialLeaderboardView: React.FC = () => {
 
   // Compute analytics dynamically when live standings sync or dynamic race results are registered
   const analytics: DriverStandingsAnalyticsData = useMemo(() => {
-    return computeDriverStandingsAnalytics(syncState.drivers);
-  }, [syncState.drivers, resultsRevision]);
+    return computeDriverStandingsAnalytics(
+      syncState.drivers,
+      syncState.apiRaceResultsByRound,
+      syncState.apiSprintPointsByRound,
+      syncState.apiRoundsMeta
+    );
+  }, [
+    syncState.drivers,
+    syncState.apiRaceResultsByRound,
+    syncState.apiSprintPointsByRound,
+    syncState.apiRoundsMeta,
+    resultsRevision,
+  ]);
 
-  // Initialize visible drivers with top 10 or all
+  // Inicializar con los 22 pilotos de la parrilla completos (sin truncado .slice(0, 10))
   useEffect(() => {
-    if (analytics.driverPointsEvolution.length > 0 && visibleDriverCodes.size === 0) {
-      const allCodes = new Set(analytics.driverPointsEvolution.map(d => d.code));
-      setVisibleDriverCodes(allCodes);
+    if (analytics.driverPointsEvolution.length > 0 && !hasInitializedSelection) {
+      const all22Codes = new Set(analytics.driverPointsEvolution.map(d => d.code));
+      setVisibleDriverCodes(all22Codes);
+      setHasInitializedSelection(true);
     }
-  }, [analytics]);
+  }, [analytics, hasInitializedSelection]);
 
   const toggleDriverVisibility = (code: string) => {
     setVisibleDriverCodes(prev => {
       const next = new Set(prev);
       if (next.has(code)) {
-        if (next.size > 1) next.delete(code); // keep at least 1
+        next.delete(code);
       } else {
         next.add(code);
       }
@@ -85,8 +88,17 @@ export const OfficialLeaderboardView: React.FC = () => {
     setVisibleDriverCodes(new Set(analytics.driverPointsEvolution.map(d => d.code)));
   };
 
+  const selectTop10Drivers = () => {
+    setVisibleDriverCodes(new Set(analytics.driverPointsEvolution.slice(0, 10).map(d => d.code)));
+  };
+
   const selectTop5Drivers = () => {
     setVisibleDriverCodes(new Set(analytics.driverPointsEvolution.slice(0, 5).map(d => d.code)));
+  };
+
+  const clearDriverSelection = () => {
+    setVisibleDriverCodes(new Set());
+    setSelectedDriverCode(null);
   };
 
   const handleManualSync = () => {
@@ -108,16 +120,14 @@ export const OfficialLeaderboardView: React.FC = () => {
     });
   }, [analytics.driverPointsEvolution, searchQuery]);
 
-  // Chart dimensions & calculations for Card 1: Points Evolution
+  // Chart dimensions & calculations for shared SVG cards
   const chartWidth = 720;
-  const chartHeight = 280;
   const paddingLeft = 40;
   const paddingRight = 30;
   const paddingTop = 20;
   const paddingBottom = 40;
 
   const innerWidth = chartWidth - paddingLeft - paddingRight;
-  const innerHeight = chartHeight - paddingTop - paddingBottom;
   const numRounds = analytics.rounds.length;
 
   const getX = (roundIdx: number) => {
@@ -125,32 +135,18 @@ export const OfficialLeaderboardView: React.FC = () => {
     return paddingLeft + (roundIdx / (numRounds - 1)) * innerWidth;
   };
 
-  const maxPointsCeil = Math.max(Math.ceil((analytics.maxPoints + 20) / 50) * 50, 100);
-  const yPointsSteps = useMemo(() => {
-    const step = maxPointsCeil <= 150 ? 25 : maxPointsCeil <= 300 ? 50 : 100;
-    const steps: number[] = [];
-    for (let p = 0; p <= maxPointsCeil; p += step) {
-      steps.push(p);
-    }
-    return steps;
-  }, [maxPointsCeil]);
-
-  const getYPoints = (pts: number) => {
-    return paddingTop + (1 - pts / maxPointsCeil) * innerHeight;
-  };
-
-  // Card 2: Ranking Evolution (Bump chart) dimensions
-  const bumpHeight = 360;
+  // Card 2: Ranking Evolution (Bump chart) dimensions for 22 drivers
+  const bumpHeight = 380;
   const bumpInnerHeight = bumpHeight - paddingTop - paddingBottom;
-  const maxRank = 23;
+  const maxRank = Math.max(analytics.driverRankingEvolution.length, 22);
 
   const getYRank = (rank: number) => {
-    return paddingTop + ((rank - 1) / (maxRank - 1)) * bumpInnerHeight;
+    return paddingTop + ((rank - 1) / Math.max(maxRank - 1, 1)) * bumpInnerHeight;
   };
 
-  // Card 3: Driver Season Stats dimensions
+  // Card 3: Driver Season Stats dimensions (Parrilla completa sin .slice(0, 16))
   const statsChartHeight = 260;
-  const statsDrivers = analytics.driverSeasonStats.slice(0, 16); // Top 16 drivers for clean bar spacing
+  const statsDrivers = analytics.driverSeasonStats;
 
   // Card 4: Points by race max
   const maxRacePoints = Math.max(...analytics.driverPointsByRace.map(r => r.totalPoints), 140);
@@ -286,14 +282,69 @@ export const OfficialLeaderboardView: React.FC = () => {
             className="standings-pill-btn" 
             onClick={handleManualSync}
             disabled={syncState.isSyncing}
-            title={t('sync_now')}
+            title="Sincronizar ahora con Jolpica F1 API"
           >
             <RotateCw 
               size={12} 
               style={{ animation: syncState.isSyncing ? 'spin 1s linear infinite' : 'none' }} 
             />
+            <span>{syncState.isSyncing ? 'Sincronizando...' : 'Actualizar'}</span>
           </button>
         </div>
+      </div>
+
+      {/* Banner Discreto de Estado Oficial FIA / Jolpica API (Paso 4) */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '10px',
+          padding: '8px 14px',
+          borderRadius: '8px',
+          background:
+            syncState.syncError && analytics.driverPointsEvolution.length === 0
+              ? 'rgba(225, 6, 0, 0.12)'
+              : 'rgba(0, 215, 182, 0.07)',
+          border:
+            syncState.syncError && analytics.driverPointsEvolution.length === 0
+              ? '1px solid rgba(225, 6, 0, 0.35)'
+              : '1px solid rgba(0, 215, 182, 0.22)',
+          fontSize: '0.74rem',
+          fontFamily: 'var(--font-mono)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#e2e8f0' }}>
+          <CheckCircle2
+            size={14}
+            color={
+              syncState.syncError && analytics.driverPointsEvolution.length === 0
+                ? '#f87171'
+                : '#00D7B6'
+            }
+          />
+          <span>
+            <strong>
+              Actualizado tras el {syncState.lastRaceName} - Ronda {syncState.round}
+            </strong>{' '}
+            <span style={{ color: '#94a3b8' }}>
+              (Temporada {syncState.season} • {analytics.driverSeries.length} Pilotos • Fuente oficial FIA / Jolpica API)
+            </span>
+          </span>
+        </div>
+        {syncState.syncError && analytics.driverPointsEvolution.length === 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ color: '#fca5a5', fontSize: '0.7rem' }}>{syncState.syncError}</span>
+            <button
+              onClick={handleManualSync}
+              className="f1-btn"
+              style={{ fontSize: '0.68rem', padding: '3px 10px', background: 'var(--f1-red)' }}
+            >
+              Reintentar recarga
+            </button>
+          </div>
+        )}
       </div>
 
       {view === 'drivers' ? (
@@ -339,58 +390,105 @@ export const OfficialLeaderboardView: React.FC = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredDrivers.map((d, idx) => {
-                  const rank = idx + 1;
-                  const isLeader = rank === 1;
-                  const gap = isLeader ? '' : `-${leaderPoints - d.finalPoints}`;
-                  const isSelected = selectedDriverCode === d.code;
-                  const isVisible = visibleDriverCodes.has(d.code);
-
-                  const podiumClass = rank === 1 
-                    ? 'pos-podium-1' 
-                    : rank === 2 
-                    ? 'pos-podium-2' 
-                    : rank === 3 
-                    ? 'pos-podium-3' 
-                    : '';
-
-                  return (
-                    <tr 
-                      key={d.code}
-                      className={`standings-row ${isSelected ? 'selected' : ''}`}
-                      onClick={() => setSelectedDriverCode(isSelected ? null : d.code)}
-                      style={{ opacity: isVisible ? 1 : 0.4 }}
-                      title={isSelected ? t('click_to_unhighlight', { name: d.name }) : t('click_to_highlight', { name: d.name })}
-                    >
-                      <td className={`standings-pos-cell ${podiumClass}`}>
-                        {rank}
+                {syncState.isInitialLoading && syncState.syncCount === 0 ? (
+                  Array.from({ length: 12 }).map((_, skIdx) => (
+                    <tr key={`skeleton-${skIdx}`} className="standings-row">
+                      <td className="standings-pos-cell" style={{ color: '#475569' }}>
+                        {skIdx + 1}
                       </td>
                       <td>
-                        <div className="standings-driver-cell">
-                          <TeamLogo team={d.team} size={20} />
-                          <span className="standings-driver-name" style={{ color: isSelected ? d.teamColor : '#fff' }}>
-                            {d.lastName}
-                          </span>
-                        </div>
+                        <div
+                          style={{
+                            height: '14px',
+                            width: '120px',
+                            borderRadius: '4px',
+                            background: 'rgba(255,255,255,0.07)',
+                          }}
+                        />
                       </td>
-                      <td className="standings-points-cell">
-                        <span className="standings-points-val">{d.finalPoints}</span>
-                        {gap && <span className="standings-gap-val">{gap}</span>}
+                      <td style={{ textAlign: 'right' }}>
+                        <div
+                          style={{
+                            height: '14px',
+                            width: '42px',
+                            marginLeft: 'auto',
+                            borderRadius: '4px',
+                            background: 'rgba(255,255,255,0.07)',
+                          }}
+                        />
                       </td>
-                      <td className="standings-evo-cell">
-                        {rank === 1 || rank === 2 ? (
-                          <span style={{ color: '#64748b' }}>—</span>
-                        ) : rank % 3 === 0 ? (
-                          <span className="standings-evo-up">▲1</span>
-                        ) : rank % 5 === 0 ? (
-                          <span className="standings-evo-down">▼1</span>
-                        ) : (
-                          <span style={{ color: '#64748b' }}>—</span>
-                        )}
-                      </td>
+                      <td style={{ textAlign: 'center', color: '#475569' }}>—</td>
                     </tr>
-                  );
-                })}
+                  ))
+                ) : (
+                  filteredDrivers.map((d) => {
+                    const rank = d.position;
+                    const isLeader = rank === 1;
+                    const gapVal = leaderPoints - d.finalPoints;
+                    const gap = isLeader || gapVal <= 0 ? '' : `-${gapVal}`;
+                    const isSelected = selectedDriverCode === d.code;
+                    const isVisible = visibleDriverCodes.has(d.code);
+
+                    const podiumClass = rank === 1 
+                      ? 'pos-podium-1' 
+                      : rank === 2 
+                      ? 'pos-podium-2' 
+                      : rank === 3 
+                      ? 'pos-podium-3' 
+                      : '';
+
+                    return (
+                      <tr 
+                        key={d.code}
+                        className={`standings-row ${isSelected ? 'selected' : ''}`}
+                        onClick={() => setSelectedDriverCode(isSelected ? null : d.code)}
+                        style={{ opacity: isVisible ? 1 : 0.4 }}
+                        title={isSelected ? t('click_to_unhighlight', { name: d.name }) : t('click_to_highlight', { name: d.name })}
+                      >
+                        <td className={`standings-pos-cell ${podiumClass}`}>
+                          {rank}
+                        </td>
+                        <td>
+                          <div className="standings-driver-cell">
+                            <TeamLogo team={d.team} size={20} />
+                            <span className="standings-driver-name" style={{ color: isSelected ? d.teamColor : '#fff' }}>
+                              {d.lastName}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: '0.62rem',
+                                fontFamily: 'var(--font-mono)',
+                                color: '#94a3b8',
+                                marginLeft: '4px',
+                              }}
+                            >
+                              {d.code}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="standings-points-cell">
+                          <span className="standings-points-val">{d.finalPoints}</span>
+                          {gap && <span className="standings-gap-val">{gap}</span>}
+                        </td>
+                        <td className="standings-evo-cell">
+                          {(() => {
+                            const rankTrack = analytics.driverRankingEvolution.find(r => r.code === d.code);
+                            const ranks = rankTrack?.rankByRound || [];
+                            const prevRank = ranks.length >= 2 ? ranks[ranks.length - 2] : rank;
+                            const diff = prevRank - rank;
+                            if (diff > 0) {
+                              return <span className="standings-evo-up">▲{diff}</span>;
+                            }
+                            if (diff < 0) {
+                              return <span className="standings-evo-down">▼{Math.abs(diff)}</span>;
+                            }
+                            return <span style={{ color: '#64748b' }}>—</span>;
+                          })()}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
               </tbody>
             </table>
           </div>
@@ -400,138 +498,26 @@ export const OfficialLeaderboardView: React.FC = () => {
               ========================================================== */}
           <div className="standings-analytics-col">
             {/* ----------------------------------------------------
-                CARD 1: Driver Points Evolution (Points Line Chart)
+                CARD 1: Driver Points Evolution (22 Drivers Full Grid Chart)
                 ---------------------------------------------------- */}
-            <div className="analytics-card">
-              <div className="analytics-card-header">
-                <h3 className="analytics-card-title">{t('chart_points_evolution')}</h3>
-                <button className="standings-export-btn" title={t('export_chart')}>
-                  <Download size={14} />
-                </button>
-              </div>
-
-              <div className="chart-container-svg">
-                <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="chart-svg">
-                  <defs>
-                    <linearGradient id="glowLine" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" stopColor="rgba(255,255,255,0.1)" />
-                      <stop offset="100%" stopColor="rgba(255,255,255,0.4)" />
-                    </linearGradient>
-                  </defs>
-
-                  {/* Horizontal Grid lines & Y-Axis Labels */}
-                  {yPointsSteps.map(pt => {
-                    const y = getYPoints(pt);
-                    return (
-                      <g key={pt}>
-                        <line 
-                          x1={paddingLeft} 
-                          y1={y} 
-                          x2={chartWidth - paddingRight} 
-                          y2={y} 
-                          className="chart-axis-line" 
-                        />
-                        <text 
-                          x={paddingLeft - 8} 
-                          y={y + 3} 
-                          textAnchor="end" 
-                          className="chart-grid-text"
-                        >
-                          {pt}
-                        </text>
-                      </g>
-                    );
-                  })}
-
-                  {/* X-Axis Grand Prix Flags */}
-                  {analytics.rounds.map((r, idx) => {
-                    const x = getX(idx);
-                    return (
-                      <g key={r.round}>
-                        <line 
-                          x1={x} 
-                          y1={paddingTop} 
-                          x2={x} 
-                          y2={chartHeight - paddingBottom} 
-                          className="chart-axis-line" 
-                          strokeDasharray="2,3"
-                        />
-                        <text 
-                          x={x} 
-                          y={chartHeight - paddingBottom + 18} 
-                          textAnchor="middle" 
-                          className="chart-flag-text"
-                        >
-                          {r.flag}
-                        </text>
-                      </g>
-                    );
-                  })}
-
-                  {/* Driver Trajectory Lines */}
-                  {analytics.driverPointsEvolution.map(driver => {
-                    if (!visibleDriverCodes.has(driver.code)) return null;
-
-                    const isDimmed = selectedDriverCode && selectedDriverCode !== driver.code;
-                    const isSelected = selectedDriverCode === driver.code;
-
-                    // Build path data
-                    const points = driver.cumulativePoints.map((pts, idx) => `${getX(idx)},${getYPoints(pts)}`);
-                    const d = `M ${points.join(' L ')}`;
-
-                    return (
-                      <g key={driver.code}>
-                        <path
-                          d={d}
-                          stroke={driver.teamColor}
-                          strokeWidth={isSelected ? 3.5 : 1.8}
-                          className={`chart-driver-line ${isSelected ? 'highlighted' : isDimmed ? 'dimmed' : ''}`}
-                          opacity={isDimmed ? 0.15 : isSelected ? 1 : 0.85}
-                          cursor="pointer"
-                          onClick={() => setSelectedDriverCode(isSelected ? null : driver.code)}
-                        />
-
-                        {/* Point circles */}
-                        {driver.cumulativePoints.map((pts, idx) => {
-                          const cx = getX(idx);
-                          const cy = getYPoints(pts);
-                          const roundInfo = analytics.rounds[idx];
-
-                          return (
-                            <circle
-                              key={idx}
-                              cx={cx}
-                              cy={cy}
-                              r={isSelected ? 4 : 2.5}
-                              fill={driver.teamColor}
-                              stroke="#0d1117"
-                              strokeWidth={1}
-                              opacity={isDimmed ? 0.2 : 0.9}
-                              cursor="pointer"
-                              onMouseEnter={(e) => {
-                                const rect = e.currentTarget.getBoundingClientRect();
-                                setHoveredPoint({
-                                  x: rect.left + window.scrollX,
-                                  y: rect.top + window.scrollY,
-                                  roundName: roundInfo ? roundInfo.name : `Ronda ${idx + 1}`,
-                                  driverName: driver.name,
-                                  team: driver.team,
-                                  points: pts,
-                                });
-                              }}
-                              onMouseLeave={() => setHoveredPoint(null)}
-                            />
-                          );
-                        })}
-                      </g>
-                    );
-                  })}
-                </svg>
-              </div>
-            </div>
+            <DriverStandingsChart
+              title={t('chart_points_evolution')}
+              exportTitle={t('export_chart')}
+              rounds={analytics.rounds}
+              driverSeries={analytics.driverSeries}
+              maxPoints={analytics.maxPoints}
+              visibleDriverCodes={visibleDriverCodes}
+              selectedDriverCode={selectedDriverCode}
+              onSelectDriver={setSelectedDriverCode}
+              onToggleDriverVisibility={toggleDriverVisibility}
+              onSelectTop5={selectTop5Drivers}
+              onSelectTop10={selectTop10Drivers}
+              onSelectAll={selectAllDrivers}
+              onClearSelection={clearDriverSelection}
+            />
 
             {/* ----------------------------------------------------
-                CARD 2: Driver Ranking Evolution (Bump Chart)
+                CARD 2: Driver Ranking Evolution (Bump Chart - 22 Pilotos)
                 ---------------------------------------------------- */}
             <div className="analytics-card">
               <div className="analytics-card-header">
@@ -543,8 +529,8 @@ export const OfficialLeaderboardView: React.FC = () => {
 
               <div className="chart-container-svg">
                 <svg viewBox={`0 0 ${chartWidth + 30} ${bumpHeight}`} className="chart-svg">
-                  {/* Position guide horizontal lines (P1, P5, P10, P15, P20) */}
-                  {[1, 5, 10, 15, 20].map(pos => {
+                  {/* Position guide horizontal lines (P1, P5, P10, P15, P20, P22) */}
+                  {[1, 5, 10, 15, 20, 22].map(pos => {
                     const y = getYRank(pos);
                     return (
                       <g key={pos}>
@@ -616,8 +602,9 @@ export const OfficialLeaderboardView: React.FC = () => {
                           d={pathD}
                           stroke={driver.teamColor}
                           strokeWidth={isSelected ? 3.5 : 1.8}
+                          strokeDasharray={driver.isSecondDriver && !isSelected ? '4 4' : undefined}
                           className={`chart-driver-line ${isSelected ? 'highlighted' : isDimmed ? 'dimmed' : ''}`}
-                          opacity={isDimmed ? 0.15 : isSelected ? 1 : 0.85}
+                          opacity={isDimmed ? 0.18 : isSelected ? 1 : 0.85}
                           cursor="pointer"
                           onClick={() => setSelectedDriverCode(isSelected ? null : driver.code)}
                         />
@@ -921,22 +908,6 @@ export const OfficialLeaderboardView: React.FC = () => {
               </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Floating Chart Tooltip */}
-      {hoveredPoint && (
-        <div 
-          className="chart-floating-tooltip"
-          style={{
-            position: 'fixed',
-            left: `${hoveredPoint.x}px`,
-            top: `${hoveredPoint.y}px`,
-          }}
-        >
-          <div style={{ fontWeight: 800, color: '#fff', marginBottom: '2px' }}>{hoveredPoint.driverName}</div>
-          <div style={{ color: '#94a3b8', fontSize: '0.68rem' }}>{hoveredPoint.roundName} • {hoveredPoint.team}</div>
-          <div style={{ color: '#00D7B6', fontWeight: 800, marginTop: '2px' }}>{hoveredPoint.points} pts</div>
         </div>
       )}
     </div>
