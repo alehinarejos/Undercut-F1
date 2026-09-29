@@ -23,6 +23,7 @@ import { RaceControlToast } from './components/RaceControlToast';
 import { ScheduleView } from './components/ScheduleView';
 import { HomeDashboardView } from './components/HomeDashboardView';
 import { OfficialLeaderboardView } from './components/OfficialLeaderboardView';
+import { GlossaryUndercutView } from './components/GlossaryUndercutView';
 import { F1_SCHEDULE } from './data/schedule';
 import { scheduleSyncService, getNextUpcomingGrandPrix, getGrandPrixTimeline } from './services/scheduleSyncService';
 import { useLanguage } from './context/LanguageContext';
@@ -30,6 +31,8 @@ import {
   getRouteFromPathname, 
   getPathnameForRoute, 
   updateSeoMetadata, 
+  injectLiveSessionSchema,
+  removeLiveSessionSchema,
   type AppRoute 
 } from './utils/seoManager';
 
@@ -354,6 +357,17 @@ export const App: React.FC = () => {
         }
         setIsOfficialLive(true);
         engine.setSessionEnded(false);
+
+        // ── SEO: inject LiveBlogPosting + SportsEvent schemas while session is live ──
+        injectLiveSessionSchema({
+          gpName: active.gp.name,
+          sessionName: active.sess.name,
+          circuitName: active.gp.circuitId || active.gp.name,
+          circuitCountry: active.gp.country || '',
+          startTimeUtc: active.sess.startTimeUtc,
+          endTimeUtc: active.sess.endTimeUtc || active.end.toISOString(),
+          sessionPath: '/live-timing',
+        });
       } else if (isWsLive || isSignalRLive) {
         setIsOfficialLive(true);
         engine.setSessionEnded(false);
@@ -384,6 +398,7 @@ export const App: React.FC = () => {
           engine.setSessionEnded(true);
         }
         setIsOfficialLive(false);
+        removeLiveSessionSchema(); // remove LiveBlogPosting when no session is active
 
         if (isRecentlyFinished) {
           const finishedAt = lastComp?.endTime || nowMs;
@@ -904,6 +919,11 @@ export const App: React.FC = () => {
           {/* TAB: Official 24-GP Calendar Schedule */}
           {activeTab === 'schedule' && (
             <ScheduleView />
+          )}
+
+          {/* TAB: Glosario — ¿Qué es el Undercut en F1? (SEO/GEO page) */}
+          {activeTab === 'glossary' && (
+            <GlossaryUndercutView onNavigate={(tab) => setActiveTab(tab as any)} />
           )}
         </div>
       </main>

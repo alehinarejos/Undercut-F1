@@ -22,10 +22,12 @@ import {
 import { SidebarDrawer } from './SidebarDrawer';
 import { TrackFlagIndicator } from './TrackFlagIndicator';
 
+import { type AppRoute } from '../utils/seoManager';
+
 interface HeaderProps {
   session: SessionState;
-  activeTab: 'home' | 'timing' | 'leaderboard' | 'schedule';
-  setActiveTab: (tab: 'home' | 'timing' | 'leaderboard' | 'schedule') => void;
+  activeTab: AppRoute;
+  setActiveTab: (tab: AppRoute) => void;
   isOfficialLive: boolean;
   signalRStatus?: SignalRConnectionStatus;
   signalRDetails?: string;

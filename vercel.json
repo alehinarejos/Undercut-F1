@@ -1,4 +1,5 @@
 {
+  "cleanUrls": true,
   "rewrites": [
     {
       "source": "/f1-static/(.*)",
@@ -7,6 +8,18 @@
     {
       "source": "/f1-signalr/(.*)",
       "destination": "https://livetiming.formula1.com/signalrcore/$1"
+    },
+    {
+      "source": "/schedule",
+      "destination": "/schedule/index.html"
+    },
+    {
+      "source": "/driver-standings",
+      "destination": "/driver-standings/index.html"
+    },
+    {
+      "source": "/live-timing",
+      "destination": "/live-timing/index.html"
     },
     {
       "source": "/(.*)",

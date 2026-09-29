@@ -29,20 +29,24 @@
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://undercut-f1-live.vercel.app/" />
     <meta property="og:site_name" content="UNDERCUT F1" />
-    <meta property="og:title" content="UNDERCUT | F1 Live Timing, Telemetría y Estrategia en Directo" />
-    <meta property="og:description" content="Sigue en directo los tiempos, telemetría y clasificaciones oficiales de la Fórmula 1 en tiempo real con UNDERCUT." />
-    <meta property="og:image" content="https://undercut-f1-live.vercel.app/favicon.svg" />
+    <meta property="og:title" content="UNDERCUT F1 | Live Timing, Telemetría y Estrategia de F1 en Directo" />
+    <meta property="og:description" content="Plataforma gratuita de telemetría y tiempos en directo de Fórmula 1. Posiciones, sectores S1/S2/S3, estrategia de neumáticos y telemetría por piloto." />
+    <meta property="og:image" content="https://undercut-f1-live.vercel.app/og-preview.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="UNDERCUT F1 — Live Timing y Telemetría de Fórmula 1 en Directo" />
     <meta property="og:locale" content="es_ES" />
     <meta property="og:locale:alternate" content="en_US" />
     <meta property="og:locale:alternate" content="fr_FR" />
     <meta property="og:locale:alternate" content="it_IT" />
 
-    <!-- Twitter Cards -->
+    <!-- Twitter / X Cards -->
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@undercutf1" />
     <meta name="twitter:url" content="https://undercut-f1-live.vercel.app/" />
-    <meta name="twitter:title" content="UNDERCUT | F1 Live Timing, Telemetría y Estrategia en Directo" />
-    <meta name="twitter:description" content="Dashboard de telemetría y tiempos de Fórmula 1 en directo. Mapa de circuito, tiempos por vuelta y clasificaciones del Mundial 2026." />
-    <meta name="twitter:image" content="https://undercut-f1-live.vercel.app/favicon.svg" />
+    <meta name="twitter:title" content="UNDERCUT F1 | Live Timing y Telemetría de F1" />
+    <meta name="twitter:description" content="Tiempos, sectores S1/S2/S3 y telemetría de Fórmula 1 en directo. Gratuito, sin registro." />
+    <meta name="twitter:image" content="https://undercut-f1-live.vercel.app/og-preview.png" />
 
     <!-- Favicon & Icons -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -54,7 +58,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,400;0,600;0,700;1,700&family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;600;700;900&display=swap" rel="stylesheet">
 
-    <!-- Schema.org Structured Data (JSON-LD) -->
+    <!-- Schema.org Structured Data (JSON-LD) — static fallback for non-JS crawlers -->
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -64,53 +68,91 @@
           "@id": "https://undercut-f1-live.vercel.app/#webapp",
           "url": "https://undercut-f1-live.vercel.app/",
           "name": "UNDERCUT F1",
+          "alternateName": ["Undercut", "Undercut Live Timing", "F1 Live Telemetry", "livetimings f1"],
           "applicationCategory": "SportsApplication",
           "operatingSystem": "All",
           "browserRequirements": "Requires JavaScript. Requires HTML5.",
-          "description": "Plataforma de telemetría y tiempos de Fórmula 1 en directo con live timing, clasificaciones del Mundial y calendario de la temporada 2026.",
+          "description": "Plataforma gratuita de telemetría y tiempos en directo de Fórmula 1. Posiciones, sectores S1/S2/S3, microsectores, estrategia de neumáticos y telemetría por piloto en tiempo real.",
+          "featureList": [
+            "Tiempos por vuelta en directo",
+            "Sectores S1, S2 y S3 en tiempo real",
+            "Microsectores y mini-sectores",
+            "Estrategia de neumáticos por piloto",
+            "Comparación de telemetría entre pilotos",
+            "Mensajes de Control de Carrera",
+            "Radio de equipo",
+            "Cuenta atrás de sesión en tiempo real",
+            "Clasificación del Campeonato del Mundo F1 2026",
+            "Calendario oficial F1 2026"
+          ],
           "offers": {
             "@type": "Offer",
             "price": "0",
-            "priceCurrency": "EUR"
+            "priceCurrency": "EUR",
+            "availability": "https://schema.org/InStock"
           },
-          "inLanguage": ["es", "en", "fr", "it"]
+          "inLanguage": ["es", "en", "fr", "it"],
+          "author": {
+            "@type": "Organization",
+            "name": "UNDERCUT F1",
+            "url": "https://undercut-f1-live.vercel.app/"
+          }
         },
         {
-          "@type": "SportsOrganization",
+          "@type": "Organization",
           "@id": "https://undercut-f1-live.vercel.app/#organization",
-          "name": "UNDERCUT F1 Telemetry",
+          "name": "UNDERCUT F1",
           "url": "https://undercut-f1-live.vercel.app/",
           "logo": "https://undercut-f1-live.vercel.app/favicon.svg",
+          "description": "Plataforma independiente de telemetría y live timing de Fórmula 1. No afiliada con Formula 1 Group, FIA ni ningún equipo oficial.",
           "sport": "Formula 1"
+        },
+        {
+          "@type": "FAQPage",
+          "@id": "https://undercut-f1-live.vercel.app/#faq",
+          "mainEntity": [
+            {
+              "@type": "Question",
+              "name": "¿Dónde ver el live timing de Fórmula 1 gratis?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Undercut F1 (undercut-f1-live.vercel.app) ofrece tiempos en directo gratuitos con datos oficiales: posiciones, sectores S1/S2/S3, estrategia de neumáticos y telemetría por piloto durante todas las sesiones del Gran Premio. No requiere registro."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "¿Qué es el undercut en Fórmula 1?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "El undercut en Fórmula 1 es una estrategia de carrera en la que un equipo realiza la parada en boxes antes que su rival directo. Al montar neumáticos nuevos con mayor agarre, el piloto registra vueltas significativamente más rápidas y emerge delante del rival cuando este también para."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "¿Qué datos de telemetría de F1 puedo ver en directo?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "En Undercut F1 puedes ver en tiempo real: tiempos de vuelta, sectores S1/S2/S3, microsectores, tipo y edad de neumáticos, paradas en boxes, gaps entre pilotos y estado de la pista (verde, safety car, bandera roja)."
+              }
+            },
+            {
+              "@type": "Question",
+              "name": "¿Es gratuito el live timing de F1 en Undercut?",
+              "acceptedAnswer": {
+                "@type": "Answer",
+                "text": "Sí, Undercut F1 es completamente gratuito y no requiere registro. Puedes acceder a todos los datos de telemetría y tiempos en directo sin ningún coste."
+              }
+            }
+          ]
         },
         {
           "@type": "BreadcrumbList",
           "@id": "https://undercut-f1-live.vercel.app/#breadcrumb",
           "itemListElement": [
-            {
-              "@type": "ListItem",
-              "position": 1,
-              "name": "Inicio",
-              "item": "https://undercut-f1-live.vercel.app/"
-            },
-            {
-              "@type": "ListItem",
-              "position": 2,
-              "name": "Dashboard Telemetría",
-              "item": "https://undercut-f1-live.vercel.app/#telemetry"
-            },
-            {
-              "@type": "ListItem",
-              "position": 3,
-              "name": "Clasificación F1 2026",
-              "item": "https://undercut-f1-live.vercel.app/#leaderboard"
-            },
-            {
-              "@type": "ListItem",
-              "position": 4,
-              "name": "Calendario Oficial F1",
-              "item": "https://undercut-f1-live.vercel.app/#schedule"
-            }
+            { "@type": "ListItem", "position": 1, "name": "Inicio", "item": "https://undercut-f1-live.vercel.app/" },
+            { "@type": "ListItem", "position": 2, "name": "Live Timing F1", "item": "https://undercut-f1-live.vercel.app/live-timing" },
+            { "@type": "ListItem", "position": 3, "name": "Clasificación F1 2026", "item": "https://undercut-f1-live.vercel.app/driver-standings" },
+            { "@type": "ListItem", "position": 4, "name": "Calendario F1 2026", "item": "https://undercut-f1-live.vercel.app/schedule" }
           ]
         }
       ]
@@ -119,6 +161,20 @@
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <div style="padding: 2rem; background: #0b0e14; color: #fff; font-family: sans-serif;">
+        <h1>UNDERCUT F1 | Live Timing y Telemetría de Fórmula 1 en Directo</h1>
+        <p>Plataforma de telemetría, tiempos por vuelta y clasificaciones oficiales de la Fórmula 1.</p>
+        <nav aria-label="Navegación principal">
+          <ul>
+            <li><a href="/" style="color: #38bdf8;">Inicio / Dashboard</a></li>
+            <li><a href="/schedule" style="color: #a855f7;">Calendario Oficial F1 2026</a></li>
+            <li><a href="/driver-standings" style="color: #ffd700;">Mundial de Pilotos y Constructores</a></li>
+            <li><a href="/live-timing" style="color: #00d7b6;">Live Timing y Telemetría en Directo</a></li>
+          </ul>
+        </nav>
+      </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

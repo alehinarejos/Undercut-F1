@@ -19,13 +19,13 @@ import {
   getRaceTargetTimestamp, 
   getTimeRemaining 
 } from '../services/scheduleSyncService';
-import { getPathnameForRoute } from '../utils/seoManager';
+import { getPathnameForRoute, type AppRoute } from '../utils/seoManager';
 
 interface SidebarDrawerProps {
   isOpen: boolean;
   onClose: () => void;
-  activeTab: 'home' | 'timing' | 'leaderboard' | 'schedule';
-  setActiveTab: (tab: 'home' | 'timing' | 'leaderboard' | 'schedule') => void;
+  activeTab: AppRoute;
+  setActiveTab: (tab: AppRoute) => void;
   session?: SessionState;
   isOfficialLive?: boolean;
   isLiveActive?: boolean;
@@ -59,16 +59,16 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
   }, [isOpen, onClose]);
 
 
-  const navItems = [
+  const navItems: { id: AppRoute; label: string; description: string; icon: any; color: string; isLive?: boolean }[] = [
     {
-      id: 'home' as const,
+      id: 'home',
       label: t('tab_dashboard'),
       description: t('sidebar_home_desc'),
       icon: LayoutDashboard,
       color: '#38bdf8',
     },
     {
-      id: 'timing' as const,
+      id: 'timing',
       label: t('tab_telemetry'),
       description: t('sidebar_timing_desc'),
       icon: Gauge,
@@ -76,22 +76,29 @@ export const SidebarDrawer: React.FC<SidebarDrawerProps> = ({
       isLive: isLiveActive,
     },
     {
-      id: 'leaderboard' as const,
+      id: 'leaderboard',
       label: t('tab_leaderboard'),
       description: t('sidebar_leaderboard_desc'),
       icon: Trophy,
       color: '#ffd700',
     },
     {
-      id: 'schedule' as const,
+      id: 'schedule',
       label: t('tab_schedule'),
       description: t('sidebar_schedule_desc'),
       icon: Calendar,
       color: '#a855f7',
     },
+    {
+      id: 'glossary',
+      label: '¿Qué es el Undercut?',
+      description: 'Glosario: estrategia de boxes en F1',
+      icon: Calendar,   // reuse Calendar icon as placeholder
+      color: '#e10600',
+    },
   ];
 
-  const handleSelectTab = (tabId: 'home' | 'timing' | 'leaderboard' | 'schedule') => {
+  const handleSelectTab = (tabId: AppRoute) => {
     setActiveTab(tabId);
     onClose();
   };
