@@ -156,12 +156,18 @@ class StandingsSyncService {
       const dataDrivers = await resDrivers.json();
       const dataConstructors = await resConstructors.json();
 
-      const rawDriverList = dataDrivers?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings;
+      const standingsMeta = dataDrivers?.MRData?.StandingsTable?.StandingsLists?.[0];
+      const apiSeason = String(standingsMeta?.season || '');
+      const apiRound = parseInt(standingsMeta?.round || '0', 10);
+      const localMinRounds = Object.keys(RACE_RESULTS_2026).length; // 15 completed rounds in 2026
+
+      const rawDriverList = standingsMeta?.DriverStandings;
       const rawConstructorList = dataConstructors?.MRData?.StandingsTable?.StandingsLists?.[0]?.ConstructorStandings;
 
       const { driverPodiums, constructorPodiums } = getOfficial2026Podiums();
 
-      if (Array.isArray(rawDriverList) && rawDriverList.length > 0) {
+      // Only overwrite local 15-round 2026 standings if the external API has at least as many rounds for 2026
+      if (apiSeason === '2026' && apiRound >= localMinRounds && Array.isArray(rawDriverList) && rawDriverList.length > 0) {
         const updatedDrivers: DriverStanding[] = rawDriverList.map((item: any) => {
           const code = item.Driver?.code || item.Driver?.familyName?.slice(0, 3)?.toUpperCase() || 'DRV';
           const teamName = item.Constructors?.[0]?.name || 'F1 Team';
@@ -169,7 +175,7 @@ class StandingsSyncService {
           const exactPodiums = driverPodiums[code] !== undefined ? driverPodiums[code] : (existing?.podiums || 0);
 
           return {
-            position: parseInt(item.position, 10),
+            position: parseInt(item.position, 10) || 1,
             driverId: item.Driver?.driverId || code.toLowerCase(),
             code: code,
             number: parseInt(item.Driver?.permanentNumber, 10) || existing?.number || 0,
@@ -183,10 +189,18 @@ class StandingsSyncService {
           };
         });
 
+        updatedDrivers.sort((a, b) => b.points - a.points || b.wins - a.wins);
+        updatedDrivers.forEach((d, idx) => { d.position = idx + 1; });
+
         this.state.drivers = updatedDrivers;
+      } else {
+        // Ensure our official 2026 standings are strictly sorted by points descending
+        const sortedDrivers = [...OFFICIAL_DRIVER_STANDINGS].sort((a, b) => b.points - a.points || b.wins - a.wins);
+        sortedDrivers.forEach((d, idx) => { d.position = idx + 1; });
+        this.state.drivers = sortedDrivers;
       }
 
-      if (Array.isArray(rawConstructorList) && rawConstructorList.length > 0) {
+      if (apiSeason === '2026' && apiRound >= localMinRounds && Array.isArray(rawConstructorList) && rawConstructorList.length > 0) {
         const updatedConstructors: ConstructorStanding[] = rawConstructorList.map((item: any) => {
           const rawName = item.Constructor?.name || 'F1 Team';
           const normTeam = normalizeTeamName(rawName);
@@ -202,7 +216,7 @@ class StandingsSyncService {
                 : (existing?.podiums || 0));
 
           return {
-            position: parseInt(item.position, 10),
+            position: parseInt(item.position, 10) || 1,
             team: teamName,
             teamColor: getTeamColor(teamName),
             points: parseFloat(item.points) || 0,
@@ -211,7 +225,14 @@ class StandingsSyncService {
           };
         });
 
+        updatedConstructors.sort((a, b) => b.points - a.points || b.wins - a.wins);
+        updatedConstructors.forEach((c, idx) => { c.position = idx + 1; });
+
         this.state.constructors = updatedConstructors;
+      } else {
+        const sortedConstructors = [...OFFICIAL_CONSTRUCTOR_STANDINGS].sort((a, b) => b.points - a.points || b.wins - a.wins);
+        sortedConstructors.forEach((c, idx) => { c.position = idx + 1; });
+        this.state.constructors = sortedConstructors;
       }
 
       this.state.lastUpdated = new Date();

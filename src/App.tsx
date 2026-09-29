@@ -389,13 +389,10 @@ export const App: React.FC = () => {
         const lastComp = timeline.lastCompletedSession;
         const nowMs = Date.now();
         const isRecentlyFinished =
-          wsStatus.isFinished ||
-          wsStatus.isChequered ||
-          (lastComp != null && !isNaN(lastComp.endTime) && (nowMs - lastComp.endTime) >= 0 && (nowMs - lastComp.endTime) < 90 * 60 * 1000);
+          lastComp != null && !isNaN(lastComp.endTime) && (nowMs - lastComp.endTime) >= 0 && (nowMs - lastComp.endTime) < 30 * 60 * 1000;
 
         if (activeSessionKeyRef.current !== null) {
           activeSessionKeyRef.current = null;
-          engine.setSessionEnded(true);
         }
         setIsOfficialLive(false);
         removeLiveSessionSchema(); // remove LiveBlogPosting when no session is active
@@ -423,8 +420,11 @@ export const App: React.FC = () => {
             trackStatus: 'CHEQUERED',
             finishedAtMs: finishedAt,
           }));
-        } else if (!engine.isEngineRunning()) {
-          engine.start();
+        } else {
+          engine.setSessionEnded(false);
+          if (!engine.isEngineRunning()) {
+            engine.start();
+          }
         }
       }
     };
@@ -656,34 +656,44 @@ export const App: React.FC = () => {
       }
 
       if (isFinished) {
+        const parsedFinishedTime = status.finishedUtc ? new Date(status.finishedUtc).getTime() : undefined;
+        const now = Date.now();
+        const isRecent = Boolean(parsedFinishedTime && !isNaN(parsedFinishedTime) && (now - parsedFinishedTime) >= 0 && (now - parsedFinishedTime) < 30 * 60 * 1000);
+
+        if (!isRecent) {
+          setIsOfficialLive(false);
+          setSignalRStatus('connected');
+          setSignalRDetails('Modo Dual • Telemetría Activa');
+          engine.setSessionEnded(false);
+          if (!engine.isEngineRunning()) {
+            engine.start();
+          }
+          return;
+        }
+
+        const finishedAtMs = parsedFinishedTime!;
         setIsOfficialLive(false);
         setSignalRStatus('connected');
         setSignalRDetails('Sesión finalizada');
         engine.setSessionEnded(true);
-        const parsedFinishedTime = status.finishedUtc ? new Date(status.finishedUtc).getTime() : undefined;
-        const now = Date.now();
-        const finishedAtMs = (parsedFinishedTime && !isNaN(parsedFinishedTime)) ? parsedFinishedTime : now;
-        const isRecent = (now - finishedAtMs) < 90 * 60 * 1000;
 
         engine.updateLiveSessionState({
-          trackStatus: isRecent ? 'CHEQUERED' : 'GREEN',
+          trackStatus: 'CHEQUERED',
           timeRemainingSec: 0,
-          finishedAtMs: isRecent ? finishedAtMs : undefined,
+          finishedAtMs,
         });
 
         setSession(prev => {
-          if (isRecent) {
-            try {
-              if (typeof window !== 'undefined') {
-                localStorage.setItem('f1_session_finished_at_ms', String(finishedAtMs));
-              }
-            } catch {}
-          }
+          try {
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('f1_session_finished_at_ms', String(finishedAtMs));
+            }
+          } catch {}
           return {
             ...prev,
-            trackStatus: isRecent ? 'CHEQUERED' : 'GREEN',
+            trackStatus: 'CHEQUERED',
             timeRemainingSec: 0,
-            finishedAtMs: isRecent ? finishedAtMs : undefined,
+            finishedAtMs,
           };
         });
       } else if (isLiveOnTrack) {

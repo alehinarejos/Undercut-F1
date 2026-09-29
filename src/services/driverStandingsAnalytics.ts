@@ -271,7 +271,7 @@ export function computeDriverStandingsAnalytics(customDrivers?: DriverStanding[]
     cumulativePointsMap.set(d.code, cum);
   });
 
-  // Build driver points trajectories
+  // Build driver points trajectories and sort strictly by finalPoints descending
   const driverPointsEvolution: DriverPointsTrajectory[] = driversList.map(d => {
     const cum = cumulativePointsMap.get(d.code) || [d.points];
     const finalPts = cum.length > 0 ? cum[cum.length - 1] : d.points;
@@ -286,6 +286,8 @@ export function computeDriverStandingsAnalytics(customDrivers?: DriverStanding[]
       finalPoints: Math.max(finalPts, d.points),
     };
   });
+
+  driverPointsEvolution.sort((a, b) => b.finalPoints - a.finalPoints);
 
   // Build round-by-round historical standings model
   const historyByRound: RoundStandingsHistory[] = roundKeys.map((roundNum, roundIdx) => {
@@ -330,36 +332,37 @@ export function computeDriverStandingsAnalytics(customDrivers?: DriverStanding[]
     });
   });
 
-  const driverRankingEvolution: DriverRankTrajectory[] = driversList.map(d => {
-    const ranks = rankEvolutionMap.get(d.code) || [d.position];
+  const driverRankingEvolution: DriverRankTrajectory[] = driverPointsEvolution.map((dp, idx) => {
+    const ranks = rankEvolutionMap.get(dp.code) || [idx + 1];
     return {
-      code: d.code,
-      name: d.name,
-      lastName: getLastName(d.name),
-      team: d.team,
-      teamColor: d.teamColor,
-      number: d.number,
+      code: dp.code,
+      name: dp.name,
+      lastName: dp.lastName,
+      team: dp.team,
+      teamColor: dp.teamColor,
+      number: dp.number,
       rankByRound: ranks,
-      currentRank: ranks.length > 0 ? ranks[ranks.length - 1] : d.position,
+      currentRank: ranks.length > 0 ? ranks[ranks.length - 1] : idx + 1,
     };
   });
 
-  // 4. Compute Season Stats (Wins, Podiums, Points finishes, Poles, DNFs)
-  const driverSeasonStats: DriverSeasonStat[] = driversList.map(d => {
-    const pts = pointsPerRoundMap.get(d.code) || [];
+  // 4. Compute Season Stats (Wins, Podiums, Points finishes, Poles, DNFs) ordered by championship rank
+  const driverSeasonStats: DriverSeasonStat[] = driverPointsEvolution.map(dp => {
+    const d = driversList.find(drv => drv.code === dp.code);
+    const pts = pointsPerRoundMap.get(dp.code) || [];
     const pointsFinishes = pts.filter(p => p > 0).length;
 
     return {
-      code: d.code,
-      name: d.name,
-      lastName: getLastName(d.name),
-      team: d.team,
-      teamColor: d.teamColor,
-      wins: d.wins || 0,
-      podiums: d.podiums || 0,
+      code: dp.code,
+      name: dp.name,
+      lastName: dp.lastName,
+      team: dp.team,
+      teamColor: dp.teamColor,
+      wins: d?.wins || 0,
+      podiums: d?.podiums || 0,
       pointsFinishes,
-      poles: polesMap.get(d.code) || 0,
-      dnfs: dnfsMap.get(d.code) || 0,
+      poles: polesMap.get(dp.code) || 0,
+      dnfs: dnfsMap.get(dp.code) || 0,
     };
   });
 

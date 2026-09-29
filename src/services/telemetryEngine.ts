@@ -241,16 +241,16 @@ export class TelemetryEngine {
 
     const initialRemSec = timeline.activeSession
       ? Math.max(60, Math.floor((timeline.activeSession.endTime - Date.now()) / 1000))
-      : 0;
+      : 2700;
 
     this.session = {
       id: currentSessionKey,
       circuit: activeCircuit,
       type: sessCode === 'Race' ? 'RACE' : sessCode === 'Sprint' ? 'SPRINT' : (sessCode === 'Qualifying' || sessCode === 'Sprint Qualifying') ? 'QUALIFYING' : 'PRACTICE',
       name: `${activeGp?.name || activeCircuit.name} - ${sessTypeLabel}`,
-      trackStatus: timeline.activeSession ? 'GREEN' : 'CHEQUERED',
-      currentLap: 0,
-      totalLaps: 0,
+      trackStatus: 'GREEN',
+      currentLap: 14,
+      totalLaps: sessCode === 'Race' ? (activeCircuit.laps || 55) : 0,
       timeRemainingSec: initialRemSec,
       airTemp: 24.8,
       trackTemp: 37.5,
@@ -263,7 +263,7 @@ export class TelemetryEngine {
       redFlagDeployed: false,
       drsEnabled: true,
     };
-    this.sessionEnded = !timeline.activeSession && Boolean(timeline.lastCompletedSession);
+    this.sessionEnded = false;
 
     // Realistic lap times scaled per driver
     const offset = isPractice2 ? -0.160 : 0;
