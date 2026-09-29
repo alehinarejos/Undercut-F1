@@ -7,7 +7,7 @@ import {
   getRaceTargetTimestamp,
   getTimeRemaining,
 } from '../services/scheduleSyncService';
-import { OFFICIAL_DRIVER_STANDINGS, OFFICIAL_CONSTRUCTOR_STANDINGS } from '../data/officialStandings';
+import { standingsSyncService } from '../services/standingsSyncService';
 import { CIRCUITS } from '../data/circuits';
 import { TeamLogo } from './TeamLogo';
 import { 
@@ -25,12 +25,19 @@ interface HomeDashboardViewProps {
 export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate }) => {
   const { t, language } = useLanguage();
   const [scheduleState, setScheduleState] = useState(scheduleSyncService.getState());
+  const [standingsState, setStandingsState] = useState(standingsSyncService.getState());
 
   useEffect(() => {
-    const unsub = scheduleSyncService.subscribe((state) => {
+    const unsubSchedule = scheduleSyncService.subscribe((state) => {
       setScheduleState({ ...state });
     });
-    return () => unsub();
+    const unsubStandings = standingsSyncService.subscribe((state) => {
+      setStandingsState({ ...state });
+    });
+    return () => {
+      unsubSchedule();
+      unsubStandings();
+    };
   }, []);
 
   // Upcoming Grand Prix (dynamically next uncompleted race)
@@ -60,13 +67,13 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate
   // Circuit SVG outline for next GP
   const nextCircuit = CIRCUITS.find(c => c.id === nextGp.circuitId) || CIRCUITS[0];
 
-  // Top 10 Drivers
-  const top10Drivers = OFFICIAL_DRIVER_STANDINGS.slice(0, 10);
-  const leaderPoints = top10Drivers[0]?.points || 267;
+  // Top 10 Drivers from live official StandingsSyncService
+  const top10Drivers = standingsState.drivers.slice(0, 10);
+  const leaderPoints = Math.max(top10Drivers[0]?.points || 1, 1);
 
-  // Top 10 Constructors
-  const top10Constructors = OFFICIAL_CONSTRUCTOR_STANDINGS.slice(0, 10);
-  const leaderConstPoints = top10Constructors[0]?.points || 468;
+  // Top 10 Constructors from live official StandingsSyncService
+  const top10Constructors = standingsState.constructors.slice(0, 10);
+  const leaderConstPoints = Math.max(top10Constructors[0]?.points || 1, 1);
 
   // Multilingual News items for 2026 Stats & Records
   const newsItems = [

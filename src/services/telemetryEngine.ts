@@ -15,6 +15,7 @@ import { CIRCUITS, CIRCUIT_MAP } from '../data/circuits';
 import { RACE_RESULTS_2026 } from '../data/raceResults2026';
 import { getNextUpcomingGrandPrix, getGrandPrixTimeline, scheduleSyncService } from './scheduleSyncService';
 import type { LiveCarTelemetry } from './f1LiveWebSocketService';
+import { fetchOfficialSessionTiming } from './officialTimingService';
 
 // Real recorded team radio communications from the last session (Monza GP 2026)
 const RECORDED_MONZA_RADIOS: TeamRadio[] = [
@@ -149,8 +150,6 @@ export class TelemetryEngine {
   private liveCarDataMap = new Map<number, LiveCarTelemetry>();
   private hasLiveCarData: boolean = false;
   private lastLiveCarDataTime: number = 0;
-  private rcEventTimer: number = 0;
-  private lastOvertakeTime: number = Date.now();
 
   // Live dynamic sector and lap tracking state per driver
   private driverLiveSectors = new Map<string, {
@@ -163,7 +162,6 @@ export class TelemetryEngine {
   }>();
   private sessionBestS1: number = 35.840;
   private sessionBestS2: number = 41.085;
-  private sessionBestS3: number = 25.380;
 
   constructor(circuitId?: string) {
     const activeGp = getNextUpcomingGrandPrix(scheduleSyncService.getState().schedule);
@@ -194,6 +192,7 @@ export class TelemetryEngine {
 
     this.loadMadridSession(this.circuit.id);
     this.start();
+    this.syncWithOfficialApi();
 
     if (typeof window !== 'undefined') {
       (window as any).__simulateOvertake = (driverCode1: string, driverCode2: string) => {
@@ -213,6 +212,23 @@ export class TelemetryEngine {
           console.warn(`[TelemetryEngine] Driver codes not found: ${driverCode1}, ${driverCode2}`);
         }
       };
+    }
+  }
+
+  public async syncWithOfficialApi(): Promise<void> {
+    try {
+      const snapshot = await fetchOfficialSessionTiming();
+      if (snapshot && Array.isArray(snapshot.engineEntries) && snapshot.engineEntries.length > 0) {
+        this.ingestOfficialLiveEntries(snapshot.engineEntries);
+        if (snapshot.isFinished) {
+          this.session.trackStatus = 'CHEQUERED';
+          this.session.timeRemainingSec = 0;
+          this.sessionEnded = true;
+        }
+        this.emitCurrentState();
+      }
+    } catch (err) {
+      console.warn('[TelemetryEngine] Error al hidratar desde API oficial:', err);
     }
   }
 
@@ -237,7 +253,6 @@ export class TelemetryEngine {
     const lapPaceSec = Math.max(68, Math.round((activeCircuit.lengthKm || 5.0) * 18.2 * 10) / 10);
     this.sessionBestS1 = Number(((lapPaceSec * 0.35) + (isPractice2 ? -0.05 : 0)).toFixed(3));
     this.sessionBestS2 = Number(((lapPaceSec * 0.40) + (isPractice2 ? -0.04 : 0)).toFixed(3));
-    this.sessionBestS3 = Number(((lapPaceSec * 0.25) + (isPractice2 ? -0.035 : 0)).toFixed(3));
 
     const initialRemSec = timeline.activeSession
       ? Math.max(60, Math.floor((timeline.activeSession.endTime - Date.now()) / 1000))
@@ -1023,7 +1038,6 @@ export class TelemetryEngine {
       const offset = isPractice2 ? -0.160 : 0;
       this.sessionBestS1 = isPractice2 ? 35.790 : 35.840;
       this.sessionBestS2 = isPractice2 ? 41.045 : 41.085;
-      this.sessionBestS3 = isPractice2 ? 25.345 : 25.380;
 
       this.leaderboard.forEach((entry, idx) => {
         const baseSec = Number((102.340 + offset + idx * 0.115).toFixed(3));
@@ -1337,119 +1351,6 @@ export class TelemetryEngine {
     } catch {}
   }
 
-  private getDriverLiveState(entry: LeaderboardEntry, currentBestLapNum: number) {
-    let state = this.driverLiveSectors.get(entry.driver.id);
-    if (!state) {
-      const baseLap = currentBestLapNum > 0 && currentBestLapNum < 200 ? currentBestLapNum : 103.2;
-      const initS1 = parseFloat(entry.s1BestTime || entry.s1Time || '35.950') || (baseLap / 102.34) * 35.84;
-      const initS2 = parseFloat(entry.s2BestTime || entry.s2Time || '41.220') || (baseLap / 102.34) * 41.12;
-      const initS3 = parseFloat(entry.s3BestTime || entry.s3Time || '25.480') || (baseLap / 102.34) * 25.38;
-      state = {
-        currentS1: initS1,
-        currentS2: initS2,
-        personalBestS1: initS1,
-        personalBestS2: initS2,
-        personalBestS3: initS3,
-        personalBestLap: baseLap,
-      };
-      this.driverLiveSectors.set(entry.driver.id, state);
-    }
-    return state;
-  }
-
-  private handleSector1Crossed(entry: LeaderboardEntry, _idx: number) {
-    const currentBest = entry.lastLapTimeNum || this.parseLapTimeToSeconds(entry.bestLapTime);
-    const state = this.getDriverLiveState(entry, currentBest);
-
-    // Realistic variation around driver's typical S1
-    const baseS1 = (state.personalBestS1 || 35.95);
-    const variance = (Math.random() * 0.28 - 0.06);
-    const s1Time = Number(Math.max(35.65, baseS1 + variance).toFixed(3));
-    state.currentS1 = s1Time;
-
-    entry.s1Time = s1Time.toFixed(3);
-
-    if (s1Time < this.sessionBestS1) {
-      this.sessionBestS1 = s1Time;
-      state.personalBestS1 = s1Time;
-      entry.s1Status = 'purple';
-    } else if (s1Time <= state.personalBestS1) {
-      state.personalBestS1 = s1Time;
-      entry.s1Status = 'green';
-    } else {
-      entry.s1Status = 'yellow';
-    }
-    entry.s1BestTime = state.personalBestS1.toFixed(3);
-    this.persistBestSectorsAndLeaderboard();
-  }
-
-  private handleSector2Crossed(entry: LeaderboardEntry, _idx: number) {
-    const currentBest = entry.lastLapTimeNum || this.parseLapTimeToSeconds(entry.bestLapTime);
-    const state = this.getDriverLiveState(entry, currentBest);
-
-    const baseS2 = (state.personalBestS2 || 41.22);
-    const variance = (Math.random() * 0.30 - 0.06);
-    const s2Time = Number(Math.max(40.95, baseS2 + variance).toFixed(3));
-    state.currentS2 = s2Time;
-
-    entry.s2Time = s2Time.toFixed(3);
-
-    if (s2Time < this.sessionBestS2) {
-      this.sessionBestS2 = s2Time;
-      state.personalBestS2 = s2Time;
-      entry.s2Status = 'purple';
-    } else if (s2Time <= state.personalBestS2) {
-      state.personalBestS2 = s2Time;
-      entry.s2Status = 'green';
-    } else {
-      entry.s2Status = 'yellow';
-    }
-    entry.s2BestTime = state.personalBestS2.toFixed(3);
-    this.persistBestSectorsAndLeaderboard();
-  }
-
-  private handleLapCompleted(entry: LeaderboardEntry, _idx: number) {
-    const currentBest = entry.lastLapTimeNum || this.parseLapTimeToSeconds(entry.bestLapTime);
-    const state = this.getDriverLiveState(entry, currentBest);
-
-    const baseS3 = (state.personalBestS3 || 25.48);
-    const variance = (Math.random() * 0.24 - 0.05);
-    const s3Time = Number(Math.max(25.25, baseS3 + variance).toFixed(3));
-
-    entry.s3Time = s3Time.toFixed(3);
-
-    if (s3Time < this.sessionBestS3) {
-      this.sessionBestS3 = s3Time;
-      state.personalBestS3 = s3Time;
-      entry.s3Status = 'purple';
-    } else if (s3Time <= state.personalBestS3) {
-      state.personalBestS3 = s3Time;
-      entry.s3Status = 'green';
-    } else {
-      entry.s3Status = 'yellow';
-    }
-    entry.s3BestTime = state.personalBestS3.toFixed(3);
-
-    const s1 = state.currentS1 || state.personalBestS1 || 35.95;
-    const s2 = state.currentS2 || state.personalBestS2 || 41.22;
-    const totalLapSec = Number((s1 + s2 + s3Time).toFixed(3));
-    const formattedLap = this.formatLapTime(totalLapSec);
-
-    entry.currentLapTime = formattedLap;
-    entry.lastLapTime = formattedLap;
-
-    // Check personal best improvement
-    const prevBestSec = state.personalBestLap && state.personalBestLap < 200 ? state.personalBestLap : currentBest;
-    if (totalLapSec < prevBestSec || !entry.bestLapTime || entry.bestLapTime === '--:--.---') {
-      state.personalBestLap = totalLapSec;
-      entry.bestLapTime = formattedLap;
-      entry.lastLapTimeNum = totalLapSec;
-    }
-
-    entry.lapsCompleted = (entry.lapsCompleted || 0) + 1;
-    this.persistBestSectorsAndLeaderboard();
-  }
-
   private buildInitialSegments(count: number, status: SectorStatus): SectorStatus[] {
     const res: SectorStatus[] = [];
     for (let i = 0; i < count; i++) {
@@ -1462,86 +1363,6 @@ export class TelemetryEngine {
       }
     }
     return res;
-  }
-
-  private getMicrosectorColor(driverNum: number, lap: number, sectorIdx: number, microIdx: number, isTopDriver: boolean): SectorStatus {
-    const hash = ((driverNum * 31 + lap * 17 + sectorIdx * 13 + microIdx * 7) % 100 + 100) % 100;
-    if (isTopDriver) {
-      if (hash < 45) return 'purple';
-      if (hash < 85) return 'green';
-      return 'yellow';
-    }
-    if (hash < 18) return 'purple';
-    if (hash < 65) return 'green';
-    return 'yellow';
-  }
-
-  private updateEntryMicrosectors(entry: LeaderboardEntry, progress: number) {
-    // Sector boundary fractions — must sum to 1.0
-    const S1_END = 0.3333;   // S1: 0 → 0.3333
-    const S2_END = 0.6666;   // S2: 0.3333 → 0.6666
-    // S3: 0.6666 → 1.0 (0.3334)
-    const S1_MICRO = S1_END / 8;
-    const S2_MICRO = (S2_END - S1_END) / 8;
-    const S3_MICRO = (1.0 - S2_END) / 9;
-
-    const lap  = entry.lapsCompleted || 1;
-    const dNum = entry.driver.number  || 1;
-    const isTop = entry.position <= 3;
-
-    /** Build all microsectors for a completed sector (every tick they're fully lit). */
-    const buildFullSector = (sectorIdx: number, count: number): SectorStatus[] => {
-      const arr: SectorStatus[] = [];
-      for (let i = 0; i < count; i++) {
-        arr.push(this.getMicrosectorColor(dNum, lap, sectorIdx, i, isTop));
-      }
-      return arr;
-    };
-
-    if (progress < S1_END) {
-      // ── S1 in progress ──────────────────────────────────────────────────────
-      const activeIdx = Math.min(7, Math.floor(progress / S1_MICRO));
-      const s1Segs: SectorStatus[] = [];
-      for (let i = 0; i < 8; i++) {
-        s1Segs.push(i <= activeIdx ? this.getMicrosectorColor(dNum, lap, 1, i, isTop) : 'none');
-      }
-      entry.s1Segments = s1Segs;
-      entry.s2Segments = Array(8).fill('none');
-      entry.s3Segments = Array(9).fill('none');
-      entry.s1Status = s1Segs.slice(0, activeIdx + 1).includes('purple') ? 'purple' : 'green';
-      entry.s2Status = 'none';
-      entry.s3Status = 'none';
-
-    } else if (progress < S2_END) {
-      // ── S2 in progress ──────────────────────────────────────────────────────
-      const activeIdx = Math.min(7, Math.floor((progress - S1_END) / S2_MICRO));
-      // S1 is fully done — always render all 8 segments with their color
-      entry.s1Segments = buildFullSector(1, 8);
-      const s2Segs: SectorStatus[] = [];
-      for (let i = 0; i < 8; i++) {
-        s2Segs.push(i <= activeIdx ? this.getMicrosectorColor(dNum, lap, 2, i, isTop) : 'none');
-      }
-      entry.s2Segments = s2Segs;
-      entry.s3Segments = Array(9).fill('none');
-      // s2Status reflects whether any lit segment is purple, else use the overall sector status
-      const hasPurpleS2 = s2Segs.slice(0, activeIdx + 1).includes('purple');
-      entry.s2Status = hasPurpleS2 ? 'purple' : activeIdx >= 0 ? 'green' : 'none';
-      entry.s3Status = 'none';
-
-    } else {
-      // ── S3 in progress ──────────────────────────────────────────────────────
-      const activeIdx = Math.min(8, Math.floor((progress - S2_END) / S3_MICRO));
-      // S1 and S2 are fully done — always render all segments with their colors
-      entry.s1Segments = buildFullSector(1, 8);
-      entry.s2Segments = buildFullSector(2, 8);
-      const s3Segs: SectorStatus[] = [];
-      for (let i = 0; i < 9; i++) {
-        s3Segs.push(i <= activeIdx ? this.getMicrosectorColor(dNum, lap, 3, i, isTop) : 'none');
-      }
-      entry.s3Segments = s3Segs;
-      const hasPurpleS3 = s3Segs.slice(0, activeIdx + 1).includes('purple');
-      entry.s3Status = hasPurpleS3 ? 'purple' : activeIdx >= 0 ? 'green' : 'none';
-    }
   }
 
   public setListeners(listeners: EngineListeners) {
@@ -1598,15 +1419,15 @@ export class TelemetryEngine {
       const existing = this.telemetryMap.get(entry.driver.id);
       const phys = this.getCircuitInstantPhysics(entry.trackProgress, this.circuit.id);
 
-        const drsVal: 0 | 1 | 2 = live.drs === 2 ? 2 : live.drs === 1 ? 1 : (live.speed > 280 ? 1 : 0);
-        this.telemetryMap.set(entry.driver.id, {
-          driverId: entry.driver.id,
-          speed: live.speed,
-          rpm: live.rpm,
-          gear: live.gear,
-          throttle: live.throttle,
-          brake: live.brake,
-          drs: drsVal,
+      const drsVal: 0 | 1 | 2 = live.drs === 2 ? 2 : live.drs === 1 ? 1 : (live.speed > 280 ? 1 : 0);
+      this.telemetryMap.set(entry.driver.id, {
+        driverId: entry.driver.id,
+        speed: live.speed,
+        rpm: live.rpm,
+        gear: live.gear,
+        throttle: live.throttle,
+        brake: live.brake,
+        drs: drsVal,
         steerAngle: existing?.steerAngle ?? phys.steerAngle,
         gForceLat: existing?.gForceLat ?? phys.latG,
         gForceLong: existing?.gForceLong ?? phys.longG,
@@ -1615,8 +1436,6 @@ export class TelemetryEngine {
       });
     }
   }
-
-  private pitTimerMap = new Map<string, number>();
 
   public setSessionEnded(ended: boolean) {
     this.sessionEnded = ended;
@@ -1718,165 +1537,22 @@ export class TelemetryEngine {
     this.addRaceControlMessage(msg);
   }
 
-  private maybeGenerateRaceControlEvent(dt: number) {
-    if (this.isLiveMode || this.hasLiveOfficialData || this.sessionEnded) return;
-    this.rcEventTimer += dt;
-    if (this.rcEventTimer < 25) return;
-    this.rcEventTimer = 0;
-
-    const rand = Math.random();
-    if (rand < 0.40) {
-      const targetDriver = this.leaderboard[Math.floor(Math.random() * Math.min(12, this.leaderboard.length))];
-      if (targetDriver) {
-        const turn = [4, 5, 9, 10, 14, 15][Math.floor(Math.random() * 6)];
-        const msg: RaceControlMessage = {
-          id: `rc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-          timestamp: this.getCurrentTimeString(),
-          flag: 'GREEN',
-          scope: 'Track',
-          driverNumber: targetDriver.driver.number,
-          messageEn: `CAR ${targetDriver.driver.number} (${targetDriver.driver.code}) LAP DELETED - TRACK LIMITS AT TURN ${turn} LAP ${this.session.currentLap || 14}`,
-          messageEs: `COCHE ${targetDriver.driver.number} (${targetDriver.driver.code}) VUELTA ANULADA - LÍMITES DE PISTA EN CURVA ${turn} (VUELTA ${this.session.currentLap || 14})`,
-          category: 'INCIDENT',
-        };
-        this.addRaceControlMessage(msg);
-      }
-    } else if (rand < 0.70) {
-      const sec = [1, 2, 3][Math.floor(Math.random() * 3)];
-      const trackSec = sec === 1 ? Math.floor(Math.random() * 6 + 1) : sec === 2 ? Math.floor(Math.random() * 8 + 9) : Math.floor(Math.random() * 6 + 17);
-      const msgYellow: RaceControlMessage = {
-        id: `rc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        timestamp: this.getCurrentTimeString(),
-        flag: 'YELLOW',
-        scope: `Sector ${sec}`,
-        sector: sec,
-        messageEn: `YELLOW IN TRACK SECTOR ${trackSec}`,
-        messageEs: `BANDERA AMARILLA EN SECTOR ${trackSec}`,
-        category: 'FLAG',
-      };
-      this.session.trackStatus = 'YELLOW';
-      this.addRaceControlMessage(msgYellow);
-
-      setTimeout(() => {
-        if (this.session.trackStatus === 'YELLOW') {
-          this.session.trackStatus = 'GREEN';
-          const msgClear: RaceControlMessage = {
-            id: `rc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-            timestamp: this.getCurrentTimeString(),
-            flag: 'GREEN',
-            scope: `Sector ${sec}`,
-            sector: sec,
-            messageEn: `CLEAR IN TRACK SECTOR ${trackSec} - TRACK CLEAR`,
-            messageEs: `PISTA DESPEJADA EN SECTOR ${trackSec}`,
-            category: 'FLAG',
-          };
-          this.addRaceControlMessage(msgClear);
-        }
-      }, 8000);
-    } else if (rand < 0.85) {
-      const msg: RaceControlMessage = {
-        id: `rc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        timestamp: this.getCurrentTimeString(),
-        flag: 'GREEN',
-        scope: 'PitLane',
-        messageEn: 'PIT EXIT OPEN',
-        messageEs: 'SALIDA DE PIT LANE ABIERTA',
-        category: 'PIT_LANE',
-      };
-      this.addRaceControlMessage(msg);
-    } else {
-      const msg: RaceControlMessage = {
-        id: `rc-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-        timestamp: this.getCurrentTimeString(),
-        flag: 'GREEN',
-        scope: 'Track',
-        messageEn: 'DRS ENABLED IN SECTORS 1 AND 2',
-        messageEs: 'DRS ACTIVADO EN SECTORES 1 Y 2',
-        category: 'FLAG',
-      };
-      this.addRaceControlMessage(msg);
-    }
+  private maybeGenerateRaceControlEvent(_dt: number) {
+    // Desactivado por regla estricta: solo se muestran mensajes reales de Race Control (OpenF1 / SignalR)
+    return;
   }
 
-  /**
-   * Simulate realistic overtaking maneuvers during a race
-   */
   private maybePerformOvertake() {
-    const isLive = this.isLiveMode || this.hasLiveOfficialData;
-    if (isLive || this.session.type !== 'RACE' || this.sessionEnded || this.session.trackStatus === 'CHEQUERED' || this.session.trackStatus === 'RED') {
-      return;
-    }
-
-    const now = Date.now();
-    // Trigger overtake every 12 to 18 seconds
-    if (now - this.lastOvertakeTime < 14000) {
-      return;
-    }
-
-    // Identify battling pairs in the midfield / lead pack
-    const eligibleIndices: number[] = [];
-    for (let i = 1; i < Math.min(16, this.leaderboard.length); i++) {
-      const chaser = this.leaderboard[i];
-      const defender = this.leaderboard[i - 1];
-      if (chaser && defender && !chaser.inPit && !defender.inPit) {
-        eligibleIndices.push(i);
-      }
-    }
-
-    if (eligibleIndices.length === 0) return;
-
-    const swapIdx = eligibleIndices[Math.floor(Math.random() * eligibleIndices.length)];
-    const chaser = this.leaderboard[swapIdx];
-    const defender = this.leaderboard[swapIdx - 1];
-    if (!chaser || !defender) return;
-
-    this.lastOvertakeTime = now;
-
-    // Swap positions
-    const newPos = defender.position;
-    const oldPos = chaser.position;
-    chaser.position = newPos;
-    defender.position = oldPos;
-
-    // Reorder in leaderboard array
-    this.leaderboard[swapIdx - 1] = chaser;
-    this.leaderboard[swapIdx] = defender;
-
-    // Adjust racing intervals
-    chaser.intervalNum = 0.285;
-    defender.intervalNum = 0.395;
-    chaser.gapToAhead = `+${chaser.intervalNum.toFixed(3)}s`;
-    defender.gapToAhead = `+${defender.intervalNum.toFixed(3)}s`;
-
-    // Emit Race Control overtake message
-    const turns = [1, 4, 10, 12, 16, 20];
-    const turn = turns[Math.floor(Math.random() * turns.length)];
-    const overtakeMsg: RaceControlMessage = {
-      id: `rc-ot-${Date.now()}`,
-      timestamp: this.getCurrentTimeString(),
-      flag: 'GREEN',
-      scope: 'Track',
-      messageEn: `OVERTAKE - CAR ${chaser.driver.number} (${chaser.driver.code}) OVERTOOK CAR ${defender.driver.number} (${defender.driver.code}) FOR P${newPos} AT TURN ${turn}`,
-      messageEs: `ADELANTAMIENTO - COCHE ${chaser.driver.number} (${chaser.driver.code}) ADELANTÓ A COCHE ${defender.driver.number} (${defender.driver.code}) POR LA P${newPos} EN CURVA ${turn}`,
-      category: 'INCIDENT',
-      lap: this.session.currentLap || 18,
-    };
-    this.addRaceControlMessage(overtakeMsg);
-
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('f1_live_leaderboard', JSON.stringify(this.leaderboard));
-      } catch {}
-    }
+    // Desactivado por regla estricta: las posiciones provienen exclusivamente de la API oficial
+    return;
   }
 
   private tick() {
-    const dt = (0.060 * this.playbackSpeed); // delta time scaled
+    const dt = 0.060 * this.playbackSpeed;
 
-    // Stop clock if session is red flagged, finished, or paused
-    const isSessionStopped = 
-      this.sessionEnded || 
-      this.session.trackStatus === 'RED' || 
+    const isSessionStopped =
+      this.sessionEnded ||
+      this.session.trackStatus === 'RED' ||
       this.session.trackStatus === 'CHEQUERED';
 
     if (!isSessionStopped && (this.session.type === 'PRACTICE' || this.session.type === 'QUALIFYING')) {
@@ -1896,21 +1572,14 @@ export class TelemetryEngine {
             category: 'FLAG',
           });
         }
-      } else if (!this.isLiveMode && !this.hasLiveOfficialData) {
-        // Default to 50m remaining if uninitialized in Practice/Qualy
-        this.session.timeRemainingSec = 3000;
       }
     }
 
-    // Dynamic Race Control message generation during active simulation
     this.maybeGenerateRaceControlEvent(dt);
     this.maybePerformOvertake();
 
-    const isLive = this.isLiveMode || this.hasLiveOfficialData;
-
-    // Update car positions & physics
+    // Actualizar telemetría física o congelar cuando la sesión ha terminado
     this.leaderboard.forEach((entry, idx) => {
-      // When session has finished (Chequered flag), all cars are parked in boxes / garages
       if (isSessionStopped) {
         this.telemetryMap.set(entry.driver.id, {
           driverId: entry.driver.id,
@@ -1929,34 +1598,12 @@ export class TelemetryEngine {
         return;
       }
 
-      // Realistic Pit / Garage duration handling when in simulation / fallback mode
-      if (!isLive && entry.inPit) {
-        const curTimer = (this.pitTimerMap.get(entry.driver.id) || 0) + dt;
-        const targetPitSec = 22 + (idx % 4) * 5; // 22s to 37s in pit
-        if (curTimer >= targetPitSec) {
-          this.pitTimerMap.delete(entry.driver.id);
-          entry.inPit = false;
-          entry.isPitOut = true;
-          entry.trackProgress = 0.02;
-          setTimeout(() => {
-            entry.isPitOut = false;
-          }, 9000);
-        } else {
-          this.pitTimerMap.set(entry.driver.id, curTimer);
-        }
-      }
-
-      // Driver individual pace multiplier (~0.985 to 1.037)
-      let speedFactor = 1.0;
-      if (idx === 0) speedFactor = 1.037; // P1 pace
-      else speedFactor = 1.037 - (idx * 0.0028);
-
+      let speedFactor = idx === 0 ? 1.037 : 1.037 - idx * 0.0028;
       if (this.session.safetyCarDeployed) speedFactor *= 0.55;
       else if (this.session.vscDeployed) speedFactor *= 0.65;
 
-      // Real physical speed in km/h: use live CarData.z if available, else circuit physics
       let instantSpeedKmh = 250;
-      const hasFreshLive = this.hasLiveCarData && (Date.now() - this.lastLiveCarDataTime < 6000);
+      const hasFreshLive = this.hasLiveCarData && Date.now() - this.lastLiveCarDataTime < 6000;
       if (hasFreshLive && this.liveCarDataMap.has(entry.driver.number)) {
         const live = this.liveCarDataMap.get(entry.driver.number)!;
         instantSpeedKmh = live.speed;
@@ -1969,153 +1616,26 @@ export class TelemetryEngine {
         instantSpeedKmh = Math.max(70, phys.speedKmh * speedFactor);
       }
 
-      // Convert km/h to meters per second & advance track progress
       const speedMps = instantSpeedKmh * (1000 / 3600);
       const trackLengthMeters = (this.circuit.lengthKm || 5.414) * 1000;
       const progressDelta = (speedMps * dt) / trackLengthMeters;
 
       const oldProgress = entry.trackProgress;
       let newProgress = entry.inPit ? oldProgress : oldProgress + progressDelta;
-
-      // Track S1 crossing (~0.333) - only simulate if NOT in live official mode
-      if (oldProgress < 0.333 && newProgress >= 0.333 && !entry.inPit && !isLive) {
-        if (entry.isPitOut) entry.isPitOut = false;
-        this.handleSector1Crossed(entry, idx);
-      }
-
-      // Track S2 crossing (~0.666) - only simulate if NOT in live official mode
-      if (oldProgress < 0.666 && newProgress >= 0.666 && !entry.inPit && !isLive) {
-        this.handleSector2Crossed(entry, idx);
-      }
-
-      // Completed a lap
       if (newProgress >= 1.0) {
         newProgress -= 1.0;
-        if (!entry.inPit && !isLive) {
-          this.handleLapCompleted(entry, idx);
-        }
-        if (idx === 0 && this.session.type === 'RACE') {
-          if (this.session.currentLap < this.session.totalLaps) {
-            this.session.currentLap += 1;
-          }
-        }
-        // Increment tyre age
-        if (!isLive && !entry.inPit) {
-          entry.tyre.age += 1;
-        }
-
-        // Realistic pit stop trigger in Practice (every ~7-9 laps if <= 3 cars currently in pit) or Race (> 24 laps)
-        const currentCarsInPit = this.leaderboard.filter(e => e.inPit).length;
-        const pitThreshold = (this.session.type === 'PRACTICE' || this.session.type === 'QUALIFYING') ? 7 : 24;
-        if (!isLive && !entry.inPit && currentCarsInPit < 4 && entry.tyre.age >= pitThreshold && Math.random() < 0.14) {
-          entry.inPit = true;
-          entry.isPitOut = false;
-          entry.pitStops = (entry.pitStops || 0) + 1;
-          entry.tyre.age = 0;
-          this.pitTimerMap.set(entry.driver.id, 0);
-          entry.tyre.compound = entry.tyre.compound === 'SOFT' ? 'MEDIUM' : 'SOFT';
-        }
       }
-
       entry.trackProgress = newProgress;
 
-      if (!isLive && !entry.inPit) {
-        this.updateEntryMicrosectors(entry, newProgress);
-      }
-
-      // Calculate car telemetry based on exact physical state at this point on track
       const telemetry = this.calculateTelemetryForProgress(entry.driver.id, newProgress, entry.inPit);
       this.telemetryMap.set(entry.driver.id, telemetry);
     });
 
-    const isPracticeOrQualy = this.session.type === 'PRACTICE' || this.session.type === 'QUALIFYING';
+    // Conservar estrictamente el orden y los intervalos oficiales registrados
+    this.leaderboard.sort((a, b) => a.position - b.position);
 
-    if (isPracticeOrQualy) {
-      // In Practice and Qualifying: Order by best lap time (or official positions if live)
-      this.leaderboard.sort((a, b) => {
-        if (isLive && a.position && b.position && a.position !== b.position) {
-          return a.position - b.position;
-        }
-        const timeA = a.lastLapTimeNum || this.parseLapTimeToSeconds(a.bestLapTime);
-        const timeB = b.lastLapTimeNum || this.parseLapTimeToSeconds(b.bestLapTime);
-        return timeA - timeB;
-      });
-
-      if (!isLive) {
-        const leaderTime = this.leaderboard[0]?.lastLapTimeNum || this.parseLapTimeToSeconds(this.leaderboard[0]?.bestLapTime) || 94.077;
-
-        this.leaderboard.forEach((entry, i) => {
-          entry.position = i + 1;
-          const driverTime = entry.lastLapTimeNum || this.parseLapTimeToSeconds(entry.bestLapTime);
-
-          if (i === 0) {
-            entry.gapToLeader = 'LÍDER';
-            entry.gapToAhead = 'LEADER';
-            entry.intervalNum = 0;
-          } else {
-            const aheadTime = this.leaderboard[i - 1].lastLapTimeNum || this.parseLapTimeToSeconds(this.leaderboard[i - 1].bestLapTime);
-            const gapToLeaderSec = Math.max(0, driverTime - leaderTime);
-            const intervalSec = Math.max(0, driverTime - aheadTime);
-
-            entry.intervalNum = Number(intervalSec.toFixed(3));
-            entry.gapToLeader = `+${gapToLeaderSec.toFixed(3)}s`;
-            entry.gapToAhead = `+${intervalSec.toFixed(3)}s`;
-          }
-        });
-      }
-    } else {
-      // In Race / Sprint: Sort by position
-      this.leaderboard.sort((a, b) => a.position - b.position);
-
-      if (!isLive) {
-        let cumulativeGap = 0;
-        this.leaderboard.forEach((entry, i) => {
-          if (entry.gapToLeader === 'DNF' || entry.gapToAhead === 'DNF') {
-            entry.gapToAhead = 'DNF';
-            entry.gapToLeader = 'DNF';
-            return;
-          }
-          if (i === 0) {
-            entry.gapToLeader = this.session.trackStatus === 'CHEQUERED' ? 'GANADOR' : 'LÍDER';
-            entry.gapToAhead = 'LEADER';
-            cumulativeGap = 0;
-          } else {
-            const delta = (Math.sin(Date.now() / 1400 + i * 1.5) * 0.003 + (Math.random() * 0.004 - 0.002)) * dt * this.playbackSpeed;
-            const currentInterval = Math.max(0.08, (entry.intervalNum || 1.1) + delta);
-            entry.intervalNum = currentInterval;
-
-            const isLappedByLeader = entry.gapToLeader.toUpperCase().includes('LAP');
-            const isLappedByAhead = entry.gapToAhead.toUpperCase().includes('LAP');
-
-            // Interval to car ahead
-            if (isLappedByAhead) {
-              if (entry.gapToAhead.toUpperCase().includes('1 LAP') || entry.gapToAhead.toUpperCase().includes('1LAP')) {
-                entry.gapToAhead = '+1 LAP';
-              }
-            } else {
-              entry.gapToAhead = `+${currentInterval.toFixed(3)}s`;
-            }
-
-            // Distance to leader
-            if (isLappedByLeader) {
-              if (entry.gapToLeader.toUpperCase().includes('2 LAP')) {
-                entry.gapToLeader = '+2 LAPS';
-              } else {
-                entry.gapToLeader = '+1 LAP';
-              }
-            } else {
-              cumulativeGap += currentInterval;
-              entry.gapToLeader = `+${cumulativeGap.toFixed(3)}s`;
-            }
-          }
-        });
-      }
-    }
-
-    // Calculate Pit Prediction ("Circle of Doom") for selected driver
     const pitPrediction = this.calculatePitPrediction(this.selectedDriverId);
 
-    // Broadcast update to subscribers
     this.listeners.onTick?.({
       leaderboard: [...this.leaderboard],
       telemetryMap: new Map(this.telemetryMap),

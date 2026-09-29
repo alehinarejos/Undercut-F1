@@ -11,12 +11,10 @@
   },
   "dependencies": {
     "@types/leaflet": "^1.9.22",
-    "@types/mapbox-gl": "^3.4.1",
     "@types/pako": "^2.0.4",
     "cbor-x": "^1.6.6",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.44.0",
-    "mapbox-gl": "^3.30.0",
     "pako": "^3.0.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
