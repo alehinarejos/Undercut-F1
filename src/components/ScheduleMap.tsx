@@ -5,7 +5,7 @@ import { CIRCUIT_GEO_MAP } from '../data/circuitGeoData';
 import { CIRCUITS_GEOJSON } from '../data/circuitsGeoJson';
 import type { GrandPrixEvent } from '../data/schedule';
 import { isGrandPrixCompleted } from '../services/scheduleSyncService';
-import { Navigation, Globe, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Navigation, Globe, AlertTriangle, Layers, Satellite } from 'lucide-react';
 
 interface ScheduleMapProps {
   schedule: GrandPrixEvent[];
@@ -13,37 +13,44 @@ interface ScheduleMapProps {
   onSelectRound: (round: number) => void;
 }
 
-// 100% Free & Open Tile Providers (Zero API Keys Required)
-const PRIMARY_TILE_URL = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-const FALLBACK_OSM_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
-const TILE_ATTRIBUTION = '&copy; <a href="https://carto.com/">CARTO</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
+export type MapStyleMode = 'esri_dark' | 'esri_satellite' | 'osm_dark';
+
+// Proveedores 100% Públicos, Sin API Keys y Sin Marcas de Agua (Esri ArcGIS REST & OpenStreetMap)
+const ESRI_DARK_BASE_URL =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
+const ESRI_DARK_REF_URL =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}';
+const ESRI_SATELLITE_URL =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+const ESRI_SATELLITE_LABELS_URL =
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}';
+const OSM_STANDARD_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
 
 export const ScheduleMap: React.FC<ScheduleMapProps> = ({
   schedule,
   selectedRound,
-  onSelectRound
+  onSelectRound,
 }) => {
   const mapContainerRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
+  const baseTileGroupRef = useRef<L.LayerGroup | null>(null);
   const markersRef = useRef<Map<number, L.Marker>>(new Map());
   const trackLayerRef = useRef<L.LayerGroup | null>(null);
   const [mapError, setMapError] = useState<boolean>(false);
-  const [tileProvider, setTileProvider] = useState<'carto_dark' | 'osm_dark'>('carto_dark');
+  const [mapStyle, setMapStyle] = useState<MapStyleMode>('esri_dark');
 
-  const selectedGp = schedule.find(g => g.round === selectedRound) || schedule[0];
+  const selectedGp = schedule.find((g) => g.round === selectedRound) || schedule[0];
 
-  // Helper para crear iconos HTML con estilos F1 (pulsos y colores según estado)
+  // Helper para crear iconos HTML con estilos F1 (pulsos y colores de alto contraste)
   const createCustomMarkerIcon = useCallback((gp: GrandPrixEvent, isSelected: boolean) => {
     const isCompleted = isGrandPrixCompleted(gp);
-    const isCurrent = isSelected;
-
-    const markerClass = isCurrent
+    const markerClass = isSelected
       ? 'f1-map-marker selected'
       : isCompleted
       ? 'f1-map-marker completed'
       : 'f1-map-marker upcoming';
 
-    const pulseHtml = isCurrent ? '<div class="marker-pulse"></div>' : '';
+    const pulseHtml = isSelected ? '<div class="marker-pulse"></div>' : '';
 
     return L.divIcon({
       className: 'f1-custom-leaflet-icon',
@@ -60,50 +67,84 @@ export const ScheduleMap: React.FC<ScheduleMapProps> = ({
     });
   }, []);
 
-  // Inicialización de Leaflet y gestión de ciclo de vida
+  // Aplicar la capa de tiles seleccionada (Esri Dark Gray Canvas, Esri Satélite o OSM Dark CSS)
+  const applyBaseTileLayer = useCallback((mode: MapStyleMode) => {
+    const map = mapInstanceRef.current;
+    const tileGroup = baseTileGroupRef.current;
+    if (!map || !tileGroup) return;
+
+    tileGroup.clearLayers();
+
+    if (mode === 'esri_dark') {
+      const darkBase = L.tileLayer(ESRI_DARK_BASE_URL, {
+        attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
+        maxZoom: 16,
+        minZoom: 2,
+      });
+      const darkLabels = L.tileLayer(ESRI_DARK_REF_URL, {
+        maxZoom: 16,
+        minZoom: 2,
+        opacity: 0.85,
+      });
+
+      let errCount = 0;
+      darkBase.on('tileerror', () => {
+        errCount += 1;
+        if (errCount >= 4) {
+          setMapStyle('osm_dark');
+        }
+      });
+
+      darkBase.addTo(tileGroup);
+      darkLabels.addTo(tileGroup);
+    } else if (mode === 'esri_satellite') {
+      const satBase = L.tileLayer(ESRI_SATELLITE_URL, {
+        attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics',
+        maxZoom: 18,
+        minZoom: 2,
+      });
+      const satLabels = L.tileLayer(ESRI_SATELLITE_LABELS_URL, {
+        maxZoom: 18,
+        minZoom: 2,
+        opacity: 0.8,
+      });
+      satBase.addTo(tileGroup);
+      satLabels.addTo(tileGroup);
+    } else {
+      const osmDarkLayer = L.tileLayer(OSM_STANDARD_URL, {
+        maxZoom: 19,
+        minZoom: 2,
+        attribution: '&copy; OpenStreetMap contributors',
+        className: 'osm-dark-tiles',
+      });
+      osmDarkLayer.addTo(tileGroup);
+    }
+  }, []);
+
+  // Inicialización de Leaflet y ResizeObserver
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return;
 
     try {
-      const geo = CIRCUIT_GEO_MAP[selectedGp.circuitId] || { lat: 40.3725, lng: 49.8533 };
+      const geo = CIRCUIT_GEO_MAP[selectedGp.circuitId] || { lat: 1.2914, lng: 103.864 };
 
       const map = L.map(mapContainerRef.current, {
         center: [geo.lat, geo.lng],
         zoom: 14,
+        maxZoom: 16,
+        minZoom: 2,
         zoomControl: false,
         attributionControl: false,
       });
 
-      // Capa primaria: CARTO Dark Matter (Sin API Key)
-      const primaryLayer = L.tileLayer(PRIMARY_TILE_URL, {
-        attribution: TILE_ATTRIBUTION,
-        subdomains: 'abcd',
-        maxZoom: 19,
-      }).addTo(map);
-
-      // Fallback automático a OpenStreetMap si CARTO tiene errores de red
-      let errorCount = 0;
-      primaryLayer.on('tileerror', () => {
-        errorCount += 1;
-        if (errorCount === 3) {
-          console.info('[ScheduleMap] Conmutando automáticamente a OpenStreetMap...');
-          setTileProvider('osm_dark');
-          L.tileLayer(FALLBACK_OSM_URL, {
-            maxZoom: 19,
-            className: 'osm-dark-filter-tiles',
-          }).addTo(map);
-        }
-      });
-
-      // Grupo de capas para el trazado GeoJSON del circuito activo
+      baseTileGroupRef.current = L.layerGroup().addTo(map);
       trackLayerRef.current = L.layerGroup().addTo(map);
 
-      // Controles de zoom abajo a la derecha
       L.control.zoom({ position: 'bottomright' }).addTo(map);
-
       mapInstanceRef.current = map;
 
-      // ResizeObserver para solventar el fallo de contenedor colapsado (0x0px)
+      applyBaseTileLayer('esri_dark');
+
       const resizeObserver = new ResizeObserver(() => {
         if (mapInstanceRef.current) {
           mapInstanceRef.current.invalidateSize();
@@ -126,30 +167,53 @@ export const ScheduleMap: React.FC<ScheduleMapProps> = ({
       console.error('[ScheduleMap] Error al inicializar Leaflet:', err);
       setMapError(true);
     }
-  }, []);
+  }, [applyBaseTileLayer]);
+
+  // Actualizar la capa de tiles cuando el usuario alterna entre Modo Oscuro (Esri), Satélite o Mapa Oscuro (OSM)
+  useEffect(() => {
+    const map = mapInstanceRef.current;
+    if (!map) return;
+    const targetMaxZoom = mapStyle === 'esri_dark' ? 16 : mapStyle === 'esri_satellite' ? 18 : 19;
+    map.setMaxZoom(targetMaxZoom);
+    if (map.getZoom() > targetMaxZoom) {
+      map.setZoom(targetMaxZoom);
+    }
+    applyBaseTileLayer(mapStyle);
+  }, [mapStyle, applyBaseTileLayer]);
 
   // Renderizar trazado real del circuito (GeoJSON) y marcadores de los 24 Grandes Premios
   useEffect(() => {
     const map = mapInstanceRef.current;
     if (!map) return;
 
-    // 1. Actualizar trazado GeoJSON del circuito seleccionado
+    // 1. Actualizar trazado GeoJSON del circuito seleccionado con alto contraste
     if (trackLayerRef.current) {
       trackLayerRef.current.clearLayers();
       const trackGeoJson = CIRCUITS_GEOJSON[selectedGp.circuitId];
       if (trackGeoJson) {
-        // Casing exterior oscuro
+        // Borde exterior oscuro de alto contraste
         L.geoJSON(trackGeoJson, {
           style: {
-            color: '#450000',
-            weight: 8,
+            color: '#090d16',
+            weight: 10,
+            opacity: 0.92,
+            lineCap: 'round',
+            lineJoin: 'round',
+          },
+        }).addTo(trackLayerRef.current);
+
+        // Halo rojo intermedio
+        L.geoJSON(trackGeoJson, {
+          style: {
+            color: '#7f0000',
+            weight: 7,
             opacity: 0.85,
             lineCap: 'round',
             lineJoin: 'round',
-          }
+          },
         }).addTo(trackLayerRef.current);
 
-        // Línea principal de carrera en rojo F1 neón
+        // Línea principal de carrera en rojo F1 oficial (#e10600)
         L.geoJSON(trackGeoJson, {
           style: {
             color: '#e10600',
@@ -157,16 +221,16 @@ export const ScheduleMap: React.FC<ScheduleMapProps> = ({
             opacity: 1,
             lineCap: 'round',
             lineJoin: 'round',
-          }
+          },
         }).addTo(trackLayerRef.current);
       }
     }
 
     // 2. Actualizar marcadores de los 24 circuitos
-    markersRef.current.forEach(m => m.remove());
+    markersRef.current.forEach((m) => m.remove());
     markersRef.current.clear();
 
-    schedule.forEach(gp => {
+    schedule.forEach((gp) => {
       const geo = CIRCUIT_GEO_MAP[gp.circuitId];
       if (!geo || typeof geo.lat !== 'number' || typeof geo.lng !== 'number') return;
 
@@ -207,7 +271,7 @@ export const ScheduleMap: React.FC<ScheduleMapProps> = ({
     if (!map) return;
     const geo = CIRCUIT_GEO_MAP[selectedGp.circuitId];
     if (geo) {
-      map.flyTo([geo.lat, geo.lng], 14, { duration: 1.3 });
+      map.flyTo([geo.lat, geo.lng], 14, { duration: 1.2 });
     }
   }, [selectedGp]);
 
@@ -227,17 +291,23 @@ export const ScheduleMap: React.FC<ScheduleMapProps> = ({
         <AlertTriangle size={32} color="var(--f1-red)" />
         <h3 style={{ color: '#fff', marginTop: '12px' }}>No se pudo cargar el mapa</h3>
         <p style={{ color: 'var(--text-muted)' }}>Mostrando vista alternativa de circuitos del campeonato.</p>
-        <button className="f1-btn" style={{ marginTop: '12px' }} onClick={() => setMapError(false)}>Reintentar</button>
+        <button className="f1-btn" style={{ marginTop: '12px' }} onClick={() => setMapError(false)}>
+          Reintentar
+        </button>
       </div>
     );
   }
 
   return (
     <div className="schedule-map-wrapper-leaflet">
-      {/* Contenedor del lienzo Leaflet */}
-      <div ref={mapContainerRef} className="schedule-leaflet-container" />
+      {/* Contenedor del lienzo Leaflet con dimensiones explícitas */}
+      <div
+        ref={mapContainerRef}
+        className="schedule-leaflet-container"
+        style={{ minHeight: '480px', height: '100%', width: '100%' }}
+      />
 
-      {/* Controles de cámara flotantes + Indicador Open-Source Libre de API Keys */}
+      {/* Controles de cámara flotantes y Selector de Mapa Oscuro / Satélite Libre de Marcas de Agua */}
       <div className="map-view-controls">
         <button
           className="map-control-pill"
@@ -250,15 +320,35 @@ export const ScheduleMap: React.FC<ScheduleMapProps> = ({
         <button
           className="map-control-pill"
           onClick={flyToWorldOverview}
-          title="Vista global de todos los Grandes Premios"
+          title="Ver los 24 Grandes Premios en el mapa mundial"
         >
           <Globe size={13} />
           <span>Vista Mundial</span>
         </button>
-        <span className="map-fallback-badge" style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
-          <CheckCircle2 size={11} />
-          <span>{tileProvider === 'carto_dark' ? 'CARTO DARK (SIN API KEY)' : 'OSM DARK (SIN API KEY)'}</span>
-        </span>
+        <button
+          className={`map-control-pill ${mapStyle === 'esri_dark' ? 'active' : ''}`}
+          onClick={() => setMapStyle('esri_dark')}
+          title="Mapa base oscuro minimalista Esri World Dark Gray Canvas"
+        >
+          <Layers size={13} />
+          <span>MODO OSCURO (ESRI)</span>
+        </button>
+        <button
+          className={`map-control-pill ${mapStyle === 'esri_satellite' ? 'active' : ''}`}
+          onClick={() => setMapStyle('esri_satellite')}
+          title="Vista aérea de satélite real Esri World Imagery"
+        >
+          <Satellite size={13} />
+          <span>SATÉLITE</span>
+        </button>
+        <button
+          className={`map-control-pill ${mapStyle === 'osm_dark' ? 'active' : ''}`}
+          onClick={() => setMapStyle('osm_dark')}
+          title="Mapa vectorial detallado OpenStreetMap Dark"
+        >
+          <Layers size={13} />
+          <span>MAPA OSCURO</span>
+        </button>
       </div>
     </div>
   );

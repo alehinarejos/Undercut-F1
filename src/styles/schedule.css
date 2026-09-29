@@ -1585,6 +1585,15 @@
   font-size: 0.65rem;
 }
 
-.osm-dark-filter-tiles {
-  filter: invert(100%) hue-rotate(180deg) brightness(95%) contrast(90%);
+.osm-dark-filter-tiles,
+.osm-dark-tiles {
+  filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
 }
+
+.map-control-pill.active {
+  background: rgba(225, 6, 0, 0.24) !important;
+  border-color: var(--f1-red) !important;
+  color: #ffffff !important;
+  box-shadow: 0 0 12px rgba(225, 6, 0, 0.35);
+}
+
