@@ -3,6 +3,7 @@ import {
   scheduleSyncService, 
   formatSessionFull, 
   isGrandPrixCompleted, 
+  isGrandPrixWeekendActive,
   getNextUpcomingGrandPrix, 
   getRaceTargetTimestamp,
   getTimeRemaining,
@@ -220,8 +221,8 @@ export const ScheduleView: React.FC = () => {
                     <span>SPRINT</span>
                   </span>
                 )}
-                <span className={`aside-status-badge ${isSelectedCompleted ? 'status-completed' : isSelectedNext ? 'status-next' : 'status-future'}`}>
-                  {isSelectedCompleted ? 'COMPLETADO' : isSelectedNext ? 'PRÓXIMO GP' : `EN ${selectedCd.days > 0 ? `${selectedCd.days}D ` : ''}${selectedCd.hours}H`}
+                <span className={`aside-status-badge ${isSelectedCompleted ? 'status-completed' : isGrandPrixWeekendActive(selectedGp, nowMs) ? 'status-live' : isSelectedNext ? 'status-next' : 'status-future'}`}>
+                  {isSelectedCompleted ? 'COMPLETADO' : isGrandPrixWeekendActive(selectedGp, nowMs) ? '🔴 EN CURSO / EN VIVO' : isSelectedNext ? 'PRÓXIMO GP' : `EN ${selectedCd.days > 0 ? `${selectedCd.days}D ` : ''}${selectedCd.hours}H`}
                 </span>
               </div>
 
@@ -407,6 +408,7 @@ export const ScheduleView: React.FC = () => {
             <div ref={carouselTrackRef} className="schedule-carousel-track">
               {filteredGps.map((gp) => {
                 const isCompleted = isGrandPrixCompleted(gp);
+                const isLiveWeekend = isGrandPrixWeekendActive(gp, nowMs);
                 const isNext = gp.round === nextGp.round;
                 const isSelected = gp.round === selectedRound;
                 const isSprint = gp.sessions.some(s => s.type === 'Sprint' || s.name.toLowerCase().includes('sprint'));
@@ -423,8 +425,8 @@ export const ScheduleView: React.FC = () => {
                       <div className="carousel-card-top">
                         <span className="carousel-round-pill">R{gp.round}</span>
                         {isSprint && <span className="sprint-tag">SPRINT</span>}
-                        <span className={`carousel-status-pill ${isCompleted ? 'completed' : isNext ? 'next' : 'future'}`}>
-                          {isCompleted ? 'FINALIZADO' : isNext ? 'PRÓXIMO' : 'PROGRAMADO'}
+                        <span className={`carousel-status-pill ${isCompleted ? 'completed' : isLiveWeekend ? 'live' : isNext ? 'next' : 'future'}`}>
+                          {isCompleted ? 'FINALIZADO' : isLiveWeekend ? '🔴 EN VIVO' : isNext ? 'PRÓXIMO' : 'PROGRAMADO'}
                         </span>
                       </div>
 
@@ -528,6 +530,8 @@ export const ScheduleView: React.FC = () => {
                     <span className="gp-round">{t('round').toUpperCase()} {gp.round}</span>
                     {isCompleted ? (
                       <span className="f1-badge badge-green">{t('completed')}</span>
+                    ) : isGrandPrixWeekendActive(gp, nowMs) ? (
+                      <span className="f1-badge badge-live">🔴 EN CURSO / EN VIVO</span>
                     ) : isNext ? (
                       <span className="f1-badge badge-live">🔴 {t('session_next')}</span>
                     ) : (

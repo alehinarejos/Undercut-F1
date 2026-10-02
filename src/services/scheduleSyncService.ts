@@ -10,8 +10,56 @@ export interface ScheduleSyncState {
   source: string;
 }
 
-const STORAGE_KEY_LAST_CHECK = 'f1_schedule_last_weekly_check_v5';
-const STORAGE_KEY_CUSTOM_SCHEDULE = 'f1_schedule_synced_2026_v5';
+export function normalizeErgastCircuitId(rawCircuitId?: string): string {
+  if (!rawCircuitId) return '';
+  const clean = rawCircuitId.toLowerCase().trim();
+  const map: Record<string, string> = {
+    albert_park: 'melbourne',
+    melbourne: 'melbourne',
+    shanghai: 'shanghai',
+    suzuka: 'suzuka',
+    bahrain: 'bahrain',
+    sakhir: 'bahrain',
+    jeddah: 'jeddah',
+    miami: 'miami',
+    villeneuve: 'montreal',
+    montreal: 'montreal',
+    monaco: 'monaco',
+    catalunya: 'barcelona',
+    barcelona: 'barcelona',
+    red_bull_ring: 'spielberg',
+    spielberg: 'spielberg',
+    silverstone: 'silverstone',
+    spa: 'spa',
+    hungaroring: 'hungaroring',
+    zandvoort: 'zandvoort',
+    monza: 'monza',
+    madring: 'madrid',
+    madrid: 'madrid',
+    baku: 'baku',
+    marina_bay: 'singapore',
+    singapore: 'singapore',
+    americas: 'austin',
+    austin: 'austin',
+    rodriguez: 'mexico',
+    mexico: 'mexico',
+    interlagos: 'interlagos',
+    vegas: 'las-vegas',
+    'las-vegas': 'las-vegas',
+    las_vegas: 'las-vegas',
+    losail: 'lusail',
+    lusail: 'lusail',
+    yas_marina: 'yas-marina',
+    'yas-marina': 'yas-marina',
+    sepang: 'sepang',
+    kuala_lumpur: 'sepang',
+    malaysia: 'sepang',
+  };
+  return map[clean] || clean;
+}
+
+const STORAGE_KEY_LAST_CHECK = 'f1_schedule_last_weekly_check_v6';
+const STORAGE_KEY_CUSTOM_SCHEDULE = 'f1_schedule_synced_2026_v6';
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 class ScheduleSyncService {
@@ -55,15 +103,17 @@ class ScheduleSyncService {
       if (savedSchedule) {
         const parsed = JSON.parse(savedSchedule);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          this.state.schedule = parsed.map(gp => {
-            const canonical = F1_SCHEDULE.find(c => c.round === gp.round);
-            const isFinished = canonical?.completed || isGrandPrixCompleted(gp);
+          // Strictly reconcile with canonical F1_SCHEDULE by circuitId — never allow Sepang or crossed IDs
+          this.state.schedule = F1_SCHEDULE.map(canonical => {
+            const savedGp = parsed.find((p: any) => p.circuitId === canonical.circuitId);
+            if (!savedGp) return canonical;
+            const isFinished = canonical.completed || isGrandPrixCompleted(canonical);
             return {
-              ...gp,
+              ...canonical,
               completed: isFinished,
-              winner: canonical?.winner || gp.winner,
-              polePosition: canonical?.polePosition || gp.polePosition,
-              sessions: canonical?.sessions || gp.sessions,
+              winner: canonical.winner || savedGp.winner,
+              polePosition: canonical.polePosition || savedGp.polePosition,
+              sessions: savedGp.sessions || canonical.sessions,
             };
           });
         }
@@ -121,7 +171,24 @@ class ScheduleSyncService {
 
       if (Array.isArray(races) && races.length > 0) {
         const updated = this.state.schedule.map((gp) => {
-          const apiRace = races.find((r: any) => parseInt(r.round, 10) === gp.round);
+          // Match strictly by normalized circuit ID and reject rogue or corrupted entries (e.g. Sepang/Malaysia)
+          const apiRace = races.find((r: any) => {
+            if (!r || !r.Circuit) return false;
+            const rawCircuitId = (r.Circuit.circuitId || '').toLowerCase();
+            const raceName = (r.raceName || '').toLowerCase();
+            const country = (r.Circuit.Location?.country || '').toLowerCase();
+
+            // Prevent cross-matching between Bahrain and Sepang
+            if (gp.circuitId === 'bahrain' && (rawCircuitId.includes('sepang') || raceName.includes('sepang') || country.includes('malas'))) {
+              return false;
+            }
+            if (gp.circuitId === 'sepang' && (rawCircuitId.includes('sakhir') || rawCircuitId.includes('bahrain') && !rawCircuitId.includes('sepang'))) {
+              return false;
+            }
+
+            const normalizedApiCircuit = normalizeErgastCircuitId(rawCircuitId);
+            return normalizedApiCircuit === gp.circuitId;
+          });
           if (!apiRace) return gp;
 
           const updatedSessions: SessionSchedule[] = gp.sessions.map((sess) => {
@@ -524,6 +591,16 @@ export function isGrandPrixCompleted(gp: GrandPrixEvent, referenceNowMs: number 
   }
   const end = new Date(`${gp.endDate}T23:59:59Z`).getTime();
   return !isNaN(end) && referenceNowMs > end;
+}
+
+/**
+ * Checks if the Grand Prix weekend is currently active / live (e.g. Oct 2-4, 2026)
+ */
+export function isGrandPrixWeekendActive(gp: GrandPrixEvent, referenceNowMs: number = getEffectiveNowMs()): boolean {
+  if (gp.completed) return false;
+  const start = new Date(`${gp.startDate}T00:00:00Z`).getTime();
+  const end = new Date(`${gp.endDate}T23:59:59Z`).getTime();
+  return referenceNowMs >= start && referenceNowMs <= end;
 }
 
 /**

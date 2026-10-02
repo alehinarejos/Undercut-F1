@@ -1,6 +1,115 @@
 import React, { useState, useMemo, useRef, useLayoutEffect, useCallback } from 'react';
+import { Activity } from 'lucide-react';
 import type { LeaderboardEntry } from '../types/telemetry';
 import { TeamLogo } from './TeamLogo';
+import { DriverSessionModal } from './DriverSessionModal';
+import { 
+  OFFICIAL_FP1_RESULTS, 
+  OFFICIAL_FP2_RESULTS, 
+  convertOfficialResultsToLeaderboardEntries 
+} from '../data/officialWeekendSessions';
+
+export type WeekendSessionKey = 'FP1' | 'FP2' | 'FP3' | 'QUALIFYING' | 'RACE';
+
+export interface WeekendSessionMeta {
+  key: WeekendSessionKey;
+  label: string;
+  badgeName: string;
+  status: 'completed' | 'live' | 'scheduled';
+  scheduledTime: string;
+  sessionKey: number;
+}
+
+export const MALAYSIAN_GP_SESSIONS: WeekendSessionMeta[] = [
+  {
+    key: 'FP1',
+    label: 'FP1',
+    badgeName: 'LIBRES 1 (FP1)',
+    status: 'completed',
+    scheduledTime: 'Vie, 2 oct • 04:30 UTC (Finalizado)',
+    sessionKey: 11727,
+  },
+  {
+    key: 'FP2',
+    label: 'FP2',
+    badgeName: 'LIBRES 2 (FP2)',
+    status: 'completed',
+    scheduledTime: 'Vie, 2 oct • 08:00 UTC (Finalizado)',
+    sessionKey: 11728,
+  },
+  {
+    key: 'FP3',
+    label: 'FP3',
+    badgeName: 'LIBRES 3 (FP3)',
+    status: 'scheduled',
+    scheduledTime: 'Sáb, 3 oct • 04:30 UTC (06:30h ESP / 12:30h Local)',
+    sessionKey: 11729,
+  },
+  {
+    key: 'QUALIFYING',
+    label: 'Qualy',
+    badgeName: 'CLASIFICACIÓN',
+    status: 'scheduled',
+    scheduledTime: 'Sáb, 3 oct • 08:00 UTC (10:00h ESP / 16:00h Local)',
+    sessionKey: 11730,
+  },
+  {
+    key: 'RACE',
+    label: 'Carrera',
+    badgeName: 'CARRERA',
+    status: 'scheduled',
+    scheduledTime: 'Dom, 4 oct • 07:00 UTC (09:00h ESP / 15:00h Local)',
+    sessionKey: 11731,
+  },
+];
+
+function createScheduledLeaderboardEntries(template: typeof OFFICIAL_FP2_RESULTS): LeaderboardEntry[] {
+  return template.map((r, idx) => ({
+    position: idx + 1,
+    previousPosition: idx + 1,
+    driver: {
+      id: r.code.toLowerCase(),
+      code: r.code,
+      number: r.driverNumber,
+      firstName: r.firstName,
+      lastName: r.lastName,
+      team: r.team,
+      teamColor: r.teamColor,
+      country: r.country || 'F1',
+      flag: r.country === 'NLD' ? '🇳🇱' : r.country === 'GBR' ? '🇬🇧' : r.country === 'MCO' ? '🇲🇨' : r.country === 'ESP' ? '🇪🇸' : r.country === 'FRA' ? '🇫🇷' : r.country === 'AUS' ? '🇦🇺' : r.country === 'ITA' ? '🇮🇹' : r.country === 'DEU' ? '🇩🇪' : r.country === 'BRA' ? '🇧🇷' : r.country === 'CAN' ? '🇨🇦' : r.country === 'ARG' ? '🇦🇷' : r.country === 'MEX' ? '🇲🇽' : '🏁',
+    },
+    gapToLeader: '—',
+    gapToAhead: '—',
+    intervalNum: 0,
+    currentLapTime: '—',
+    bestLapTime: '—',
+    lastLapTime: '—',
+    lastLapTimeNum: 0,
+    s1Time: '—',
+    s2Time: '—',
+    s3Time: '—',
+    s1BestTime: '—',
+    s2BestTime: '—',
+    s3BestTime: '—',
+    s1Status: 'none',
+    s2Status: 'none',
+    s3Status: 'none',
+    s1Segments: Array(8).fill('none'),
+    s2Segments: Array(8).fill('none'),
+    s3Segments: Array(9).fill('none'),
+    tyre: {
+      compound: 'SOFT',
+      age: 0,
+      used: false,
+    },
+    pitStops: 0,
+    inPit: true,
+    isPitOut: false,
+    speedTrap: 0,
+    trackProgress: 0,
+    lapsCompleted: 0,
+  }));
+}
 
 // Helper to parse lap time to seconds for finding fastest lap
 const parseLapTimeToSec = (t?: string): number => {
@@ -253,6 +362,7 @@ interface LeaderboardProps {
   isQualifying?: boolean;
   sessionType?: string;
   sessionName?: string;
+  sessionId?: string;
   timeRemainingSec?: number;
   totalLaps?: number;
   trackStatus?: string;
@@ -265,15 +375,61 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
   isQualifying = false,
   sessionType = 'PRACTICE',
   sessionName = 'Libres 1 (FP1)',
+  sessionId = 'latest',
   timeRemainingSec = 3000,
   totalLaps = 0,
   trackStatus = 'GREEN',
 }) => {
+  const [modalDriver, setModalDriver] = useState<{
+    driverNumber: number | string;
+    driverCode: string;
+    driverName: string;
+    team: string;
+    teamColor: string;
+    flag?: string;
+    position?: number;
+  } | null>(null);
+
+  // Active Session Switcher Tab (Defaults to FP2 - latest completed session)
+  const [selectedSessionTab, setSelectedSessionTab] = useState<WeekendSessionKey>(() => {
+    const lower = (sessionName || '').toLowerCase();
+    if (trackStatus !== 'CHEQUERED' && trackStatus !== 'FINISHED') {
+      if (lower.includes('fp3')) return 'FP3';
+      if (lower.includes('qual') || sessionType === 'QUALIFYING') return 'QUALIFYING';
+      if (sessionType === 'RACE') return 'RACE';
+    }
+    return 'FP2';
+  });
+
+  const activeRawEntries = useMemo(() => {
+    // 1. If currently viewed tab is live on track:
+    const isLiveSession = trackStatus !== 'CHEQUERED' && trackStatus !== 'FINISHED' && (
+      (selectedSessionTab === 'FP3' && (sessionName || '').toLowerCase().includes('fp3')) ||
+      (selectedSessionTab === 'QUALIFYING' && (sessionType === 'QUALIFYING' || (sessionName || '').toLowerCase().includes('qual'))) ||
+      (selectedSessionTab === 'RACE' && (sessionType === 'RACE' || (sessionName || '').toLowerCase().includes('carrera')))
+    );
+
+    if (isLiveSession && rawEntries && rawEntries.length > 0) {
+      return rawEntries;
+    }
+
+    // 2. Official frozen results from OpenF1 for completed sessions
+    if (selectedSessionTab === 'FP1') {
+      return convertOfficialResultsToLeaderboardEntries(OFFICIAL_FP1_RESULTS);
+    }
+    if (selectedSessionTab === 'FP2') {
+      return convertOfficialResultsToLeaderboardEntries(OFFICIAL_FP2_RESULTS);
+    }
+
+    // 3. Clean zeroed grid for scheduled upcoming sessions (FP3, Qualy, Carrera)
+    return createScheduledLeaderboardEntries(OFFICIAL_FP2_RESULTS);
+  }, [selectedSessionTab, rawEntries, sessionName, sessionType, trackStatus]);
+
   const entries = useMemo(() => {
-    if (!Array.isArray(rawEntries)) return [];
-    const hasHadjar = rawEntries.some(e => e?.driver && (e.driver.code === 'HAD' || e.driver.number === 6));
+    if (!Array.isArray(activeRawEntries)) return [];
+    const hasHadjar = activeRawEntries.some(e => e?.driver && (e.driver.code === 'HAD' || e.driver.number === 6));
     const result: LeaderboardEntry[] = [];
-    for (const e of rawEntries) {
+    for (const e of activeRawEntries) {
       if (!e || !e.driver) continue;
       const isTsu =
         e.driver.code === 'TSU' ||
@@ -319,7 +475,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
       ...e,
       position: e.position || (idx + 1),
     }));
-  }, [rawEntries]);
+  }, [activeRawEntries]);
 
   const [viewMode, setViewMode] = useState<'timing' | 'stints'>('timing');
 
@@ -495,18 +651,15 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
   // Determine whether this session is timed (Practice / Qualifying) vs Lap-based (Race / Sprint)
   const isTimedSession = sessionType === 'PRACTICE' || sessionType === 'QUALIFYING' || totalLaps === 0 || (sessionName && /fp|practice|libres|qual/i.test(sessionName));
 
-  const formattedSessionBadge = (() => {
-    const lower = (sessionName || '').toLowerCase();
-    if (lower.includes('fp1') || lower.includes('practice 1') || lower.includes('libres 1')) return 'LIBRES 1 (FP1)';
-    if (lower.includes('fp2') || lower.includes('practice 2') || lower.includes('libres 2')) return 'LIBRES 2 (FP2)';
-    if (lower.includes('fp3') || lower.includes('practice 3') || lower.includes('libres 3')) return 'LIBRES 3 (FP3)';
-    if (lower.includes('qual') || sessionType === 'QUALIFYING') return 'CLASIFICACIÓN';
-    if (sessionType === 'SPRINT') return 'SPRINT';
-    if (sessionType === 'RACE') return 'CARRERA';
-    return 'LIBRES 1 (FP1)';
-  })();
+  const currentSessionMeta = MALAYSIAN_GP_SESSIONS.find(s => s.key === selectedSessionTab) || MALAYSIAN_GP_SESSIONS[1];
+  const isScheduledSession = selectedSessionTab === 'FP3' || selectedSessionTab === 'QUALIFYING' || selectedSessionTab === 'RACE';
+  const effectiveSessionKey = currentSessionMeta.sessionKey;
+
+  const formattedSessionBadge = currentSessionMeta.badgeName;
 
   const formattedRemainingTime = (() => {
+    if (isScheduledSession) return '00:00';
+    if (selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2') return '00:00';
     const sec = Math.max(0, localRemainingSec);
     const mins = Math.floor(sec / 60);
     const remSecs = Math.floor(sec % 60);
@@ -518,7 +671,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
   const effectiveOnTrackCount = Math.max(0, entries.length - effectiveInPitCount);
 
   // Qualifying cutoff calculations
-  const isQualy = isQualifying || sessionType === 'QUALIFYING' || /qual|clasif/i.test(sessionName || '');
+  const isQualy = isQualifying || sessionType === 'QUALIFYING' || /qual|clasif/i.test(sessionName || '') || selectedSessionTab === 'QUALIFYING';
   const totalCars = entries.length;
   // In 2026 regulations with 22 cars (11 teams, e.g. Cadillac):
   // Q1 eliminates 6 cars (P17-P22, top 16 advance) -> cutoff divider before index 16 (P17)
@@ -556,7 +709,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
             Tabla de Tiempos
           </span>
 
-          {/* Session Type Badge (e.g. LIBRES 1 (FP1)) */}
+          {/* Session Type Badge (e.g. LIBRES 2 (FP2)) */}
           <div style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -574,17 +727,36 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
           </div>
 
           {/* Remaining Duration Timer (for FP1/FP2/FP3/Qualy) OR Lap Counter (for Race/Sprint) */}
-          {isTimedSession ? (
+          {isScheduledSession ? (
             <div style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: '6px',
-              background: (localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
+              background: 'rgba(59, 130, 246, 0.14)',
+              border: '1px solid rgba(59, 130, 246, 0.35)',
+              padding: '2px 10px',
+              borderRadius: '6px',
+            }}
+            title="Sesión programada según calendario oficial"
+            >
+              <span style={{ fontSize: '0.62rem', fontWeight: 800, color: '#60a5fa', letterSpacing: '0.5px' }}>
+                📅 PROGRAMADA
+              </span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: '0.78rem', color: '#ffffff' }}>
+                {selectedSessionTab === 'FP3' ? 'SÁB 04:30 UTC' : selectedSessionTab === 'QUALIFYING' ? 'SÁB 08:00 UTC' : 'DOM 07:00 UTC'}
+              </span>
+            </div>
+          ) : isTimedSession ? (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: (selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2' || localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
                 ? 'rgba(255, 255, 255, 0.1)'
                 : trackStatus === 'RED'
                 ? 'rgba(239, 68, 68, 0.18)'
                 : 'rgba(0, 215, 182, 0.14)',
-              border: (localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
+              border: (selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2' || localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
                 ? '1px solid rgba(255, 255, 255, 0.28)'
                 : trackStatus === 'RED'
                 ? '1px solid rgba(239, 68, 68, 0.45)'
@@ -597,14 +769,14 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
               <span style={{
                 fontSize: '0.62rem',
                 fontWeight: 800,
-                color: (localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
+                color: (selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2' || localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
                   ? '#e2e8f0'
                   : trackStatus === 'RED'
                   ? '#ff4d4d'
                   : '#00D7B6',
                 letterSpacing: '0.5px',
               }}>
-                {(localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
+                {(selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2' || localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
                   ? '🏁 FINALIZADA'
                   : trackStatus === 'RED'
                   ? '⏸ DETENIDA'
@@ -634,28 +806,49 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                 {currentRaceLap}
               </span>
               <span style={{ fontSize: '0.68rem', color: 'rgba(255, 255, 255, 0.45)', fontWeight: 700 }}>
-                / {totalLaps || 55}
+                / {totalLaps || 56}
               </span>
             </div>
           )}
 
           {/* On-Track vs In-Pit Live Counter Pill */}
-          <div style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            background: 'rgba(255, 255, 255, 0.05)',
-            border: '1px solid rgba(255, 255, 255, 0.12)',
-            padding: '2px 8px',
-            borderRadius: '6px',
-            fontFamily: 'var(--font-mono)',
-            fontSize: '0.64rem',
-            fontWeight: 700,
-          }}>
-            <span style={{ color: '#00e676' }}>● {effectiveOnTrackCount} PISTA</span>
-            <span style={{ color: 'rgba(255,255,255,0.2)' }}>|</span>
-            <span style={{ color: '#60a5fa' }}>{effectiveInPitCount} BOX</span>
-          </div>
+          {isScheduledSession ? (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              padding: '2px 8px',
+              borderRadius: '6px',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.64rem',
+              fontWeight: 700,
+            }}>
+              <span style={{ color: '#94a3b8' }}>22 EN ESPERA</span>
+            </div>
+          ) : (
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              padding: '2px 8px',
+              borderRadius: '6px',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.64rem',
+              fontWeight: 700,
+            }}>
+              <span style={{ color: (selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2') ? '#94a3b8' : '#00e676' }}>
+                {(selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2') ? '● 0 PISTA' : `● ${effectiveOnTrackCount} PISTA`}
+              </span>
+              <span style={{ color: 'rgba(255,255,255,0.2)' }}>|</span>
+              <span style={{ color: '#60a5fa' }}>
+                {(selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2') ? '22 BOX' : `${effectiveInPitCount} BOX`}
+              </span>
+            </div>
+          )}
 
           <div style={{
             display: 'inline-flex',
@@ -699,12 +892,52 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {/* Right Header Area: Session Switcher & Official FIA Timing Badge */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          <div className="session-switcher-bar">
+            <span className="session-switcher-label">SESIÓN:</span>
+            {MALAYSIAN_GP_SESSIONS.map((sess) => {
+              const isSelected = selectedSessionTab === sess.key;
+              return (
+                <button
+                  key={sess.key}
+                  className={`session-tab-btn ${isSelected ? 'active' : ''}`}
+                  onClick={() => setSelectedSessionTab(sess.key)}
+                  title={sess.scheduledTime}
+                >
+                  {sess.status === 'completed' && <span className="tab-check">✓</span>}
+                  {sess.status === 'live' && <span className="tab-live-dot" />}
+                  <span>{sess.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
           <div className="f1-badge badge-green" style={{ fontSize: '0.62rem', padding: '2px 8px' }}>
             OFFICIAL FIA TIMING
           </div>
         </div>
       </div>
+
+      {/* Standby Banner for Scheduled Upcoming Sessions */}
+      {isScheduledSession && (
+        <div className="session-scheduled-banner">
+          <div className="session-scheduled-info">
+            <span style={{ fontSize: '1.25rem' }}>📅</span>
+            <div>
+              <div className="session-scheduled-title">
+                Sesión Programada — {currentSessionMeta.badgeName}
+              </div>
+              <div className="session-scheduled-subtitle">
+                Comienza el {currentSessionMeta.scheduledTime}
+              </div>
+            </div>
+          </div>
+          <div className="session-scheduled-badge">
+            PARRILLA A CERO
+          </div>
+        </div>
+      )}
 
       {/* Table Header: POS | DRIVER | GAP | INT | LAST | BEST | MINI-SECTORS | LAPS | PIT | TYRE */}
       <div className="leaderboard-header-row">
@@ -720,6 +953,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
         <span className="col-header-center">LAPS</span>
         <span className="col-header-center">PIT</span>
         <span className="col-header-center">TYRE</span>
+        <span className="col-header-center" title="Historial de telemetría y vueltas">DATA</span>
       </div>
 
       {/* Live Overtake Toast Alert */}
@@ -1071,11 +1305,52 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                     }} />
                   )}
                 </div>
+
+                {/* 11. ACTION BUTTON: Open Driver Session Modal */}
+                <div className="cell-action-modal" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <button
+                    className="driver-laps-action-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setModalDriver({
+                        driverNumber: entry.driver.number,
+                        driverCode: entry.driver.code,
+                        driverName: `${entry.driver.firstName} ${entry.driver.lastName}`,
+                        team: entry.driver.team,
+                        teamColor,
+                        flag: entry.driver.flag,
+                        position: entry.position,
+                      });
+                    }}
+                    title={`Ver historial de vueltas y telemetría de ${entry.driver.code}`}
+                    aria-label={`Ver historial de vueltas y telemetría de ${entry.driver.code}`}
+                  >
+                    <Activity size={13} />
+                  </button>
+                </div>
               </div>
             </React.Fragment>
           );
         })}
       </div>
+
+      {/* Driver Session Details Modal */}
+      {modalDriver && (
+        <DriverSessionModal
+          isOpen={Boolean(modalDriver)}
+          onClose={() => setModalDriver(null)}
+          driverNumber={modalDriver.driverNumber}
+          driverCode={modalDriver.driverCode}
+          driverName={modalDriver.driverName}
+          team={modalDriver.team}
+          teamColor={modalDriver.teamColor}
+          flag={modalDriver.flag}
+          position={modalDriver.position}
+          sessionKey={effectiveSessionKey || sessionId}
+          sessionName={currentSessionMeta.badgeName}
+          overallBestLapTime={minSessionBestSec !== Infinity ? entries[0]?.bestLapTime : undefined}
+        />
+      )}
     </div>
   );
 };

@@ -16,6 +16,7 @@ import { RACE_RESULTS_2026 } from '../data/raceResults2026';
 import { getNextUpcomingGrandPrix, getGrandPrixTimeline, scheduleSyncService } from './scheduleSyncService';
 import type { LiveCarTelemetry } from './f1LiveWebSocketService';
 import { fetchOfficialSessionTiming } from './officialTimingService';
+import { sessionArchiveService } from './sessionArchiveService';
 
 // Real recorded team radio communications from the last session (Monza GP 2026)
 const RECORDED_MONZA_RADIOS: TeamRadio[] = [
@@ -160,8 +161,6 @@ export class TelemetryEngine {
     personalBestS3: number;
     personalBestLap: number;
   }>();
-  private sessionBestS1: number = 35.840;
-  private sessionBestS2: number = 41.085;
 
   constructor(circuitId?: string) {
     const activeGp = getNextUpcomingGrandPrix(scheduleSyncService.getState().schedule);
@@ -249,10 +248,8 @@ export class TelemetryEngine {
     const currentSessionKey = `${activeCircuitId}-${sessCode}-${sessObj?.startTimeUtc || 'default'}`;
     const isPractice2 = /fp2|practice 2|libres 2/i.test(sessTypeLabel) || sessCode === 'FP2';
 
-    // Calculate baseline lap time and sector benchmarks scaled to circuit length (~18.2s per km)
+    // Calculate baseline lap time scaled to circuit length (~18.2s per km)
     const lapPaceSec = Math.max(68, Math.round((activeCircuit.lengthKm || 5.0) * 18.2 * 10) / 10);
-    this.sessionBestS1 = Number(((lapPaceSec * 0.35) + (isPractice2 ? -0.05 : 0)).toFixed(3));
-    this.sessionBestS2 = Number(((lapPaceSec * 0.40) + (isPractice2 ? -0.04 : 0)).toFixed(3));
 
     const initialRemSec = timeline.activeSession
       ? Math.max(60, Math.floor((timeline.activeSession.endTime - Date.now()) / 1000))
@@ -992,21 +989,23 @@ export class TelemetryEngine {
         isSameSession = storedKey === resolvedKey;
 
         if (!isSameSession) {
-          // Archive previous session's best lap into Weekend Fastest Lap before clearing
+          // Archive previous session immutably before clearing
           const prevRaw = localStorage.getItem('f1_official_latest_session_v4');
           if (prevRaw) {
-            const prevParsed = JSON.parse(prevRaw);
-            if (Array.isArray(prevParsed) && !this.isSyntheticLeaderboard(prevParsed) && prevParsed[0]?.bestLapTime) {
-              const prevBestSec = this.parseLapTimeToSeconds(prevParsed[0].bestLapTime);
-              if (prevBestSec >= 65 && prevBestSec < 200) {
-                const wkKey = `f1_weekend_fastest_v2_${this.circuit.id}`;
-                const cleanPrevShort = prevName.includes(' - ') ? prevName.split(' - ').slice(-1)[0] : prevName;
-                localStorage.setItem(wkKey, JSON.stringify({
-                  sec: prevBestSec,
-                  driverCode: prevParsed[0].driver?.code || 'ANT',
-                  sessionLabel: cleanPrevShort || 'FP1',
-                }));
+            try {
+              const prevParsed = JSON.parse(prevRaw);
+              if (Array.isArray(prevParsed) && prevParsed.length > 0 && prevParsed[0]?.bestLapTime) {
+                sessionArchiveService.archiveSession(
+                  storedKey || 'previous-session',
+                  prevName,
+                  this.circuit.id,
+                  this.session.type,
+                  prevParsed,
+                  this.circuit.name
+                );
               }
+            } catch (e) {
+              console.warn('[TelemetryEngine] Error archiving previous session:', e);
             }
           }
           // Wipe previous session leaderboard and best sectors
@@ -1032,47 +1031,51 @@ export class TelemetryEngine {
     }
 
     if (!hasSameSessionSavedData && !(isSameSession && this.hasLiveOfficialData)) {
-      // Clear previous session live sector state and initialize fresh session times while waiting for live WS / OpenF1
+      // Clear previous session live sector state and initialize 100% clean zeroed timing state
       this.driverLiveSectors.clear();
-      const isPractice2 = /fp2|practice 2|libres 2/i.test(sessionName);
-      const offset = isPractice2 ? -0.160 : 0;
-      this.sessionBestS1 = isPractice2 ? 35.790 : 35.840;
-      this.sessionBestS2 = isPractice2 ? 41.045 : 41.085;
 
       this.leaderboard.forEach((entry, idx) => {
-        const baseSec = Number((102.340 + offset + idx * 0.115).toFixed(3));
-        const s1Val = Number((this.sessionBestS1 + idx * 0.042).toFixed(3));
-        const s2Val = Number(((idx === 1 ? this.sessionBestS2 : this.sessionBestS2 + 0.035) + idx * 0.048).toFixed(3));
-        const s3Val = Number((baseSec - s1Val - s2Val).toFixed(3));
-        const s1 = s1Val.toFixed(3);
-        const s2 = s2Val.toFixed(3);
-        const s3 = s3Val.toFixed(3);
-        const formattedLap = this.formatLapTime(baseSec);
-
-        entry.bestLapTime = formattedLap;
-        entry.currentLapTime = formattedLap;
-        entry.lastLapTime = formattedLap;
-        entry.lastLapTimeNum = baseSec;
-        entry.s1Time = s1;
-        entry.s2Time = s2;
-        entry.s3Time = s3;
-        entry.s1BestTime = s1;
-        entry.s2BestTime = s2;
-        entry.s3BestTime = s3;
-        entry.s1Status = idx === 0 ? 'purple' : idx < 3 ? 'green' : 'yellow';
-        entry.s2Status = idx === 1 ? 'purple' : idx < 4 ? 'green' : 'yellow';
-        entry.s3Status = idx === 0 ? 'purple' : idx < 3 ? 'green' : 'yellow';
-        entry.s1Segments = this.buildInitialSegments(8, entry.s1Status);
-        entry.s2Segments = this.buildInitialSegments(8, entry.s2Status);
-        entry.s3Segments = this.buildInitialSegments(9, entry.s3Status);
-        entry.gapToLeader = idx === 0 ? 'LÍDER' : `+${(baseSec - (102.340 + offset)).toFixed(3)}s`;
-        entry.gapToAhead = idx === 0 ? 'LEADER' : `+0.115s`;
-        entry.intervalNum = idx === 0 ? 0 : 0.115;
-        entry.inPit = idx >= 18;
+        entry.bestLapTime = '--:--.---';
+        entry.currentLapTime = '--:--.---';
+        entry.lastLapTime = '--:--.---';
+        entry.lastLapTimeNum = 0;
+        entry.s1Time = '--.---';
+        entry.s2Time = '--.---';
+        entry.s3Time = '--.---';
+        entry.s1BestTime = '--.---';
+        entry.s2BestTime = '--.---';
+        entry.s3BestTime = '--.---';
+        entry.s1Status = 'none';
+        entry.s2Status = 'none';
+        entry.s3Status = 'none';
+        entry.s1Segments = [];
+        entry.s2Segments = [];
+        entry.s3Segments = [];
+        entry.gapToLeader = idx === 0 ? 'LÍDER' : '—';
+        entry.gapToAhead = idx === 0 ? 'LEADER' : '—';
+        entry.intervalNum = 0;
+        entry.inPit = true; // all cars waiting in garage before turning laps
         entry.isPitOut = false;
-        entry.tyre.age = 2;
-        entry.lapsCompleted = 2;
-        entry.trackProgress = (idx * 0.045) % 1.0;
+        entry.tyre.age = 0;
+        entry.lapsCompleted = 0;
+        entry.trackProgress = 0;
+        entry.speedTrap = 0;
+
+        // Reset car telemetry in garage
+        this.telemetryMap.set(entry.driver.id, {
+          driverId: entry.driver.id,
+          speed: 0,
+          rpm: 0,
+          gear: 0,
+          throttle: 0,
+          brake: 0,
+          drs: 0,
+          steerAngle: 0,
+          gForceLat: 0,
+          gForceLong: 0,
+          ersBattery: 100,
+          ersDeploy: 0,
+        });
       });
     }
 

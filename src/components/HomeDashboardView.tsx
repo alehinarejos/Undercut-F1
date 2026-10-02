@@ -3,6 +3,7 @@ import { useLanguage } from '../context/LanguageContext';
 import { 
   scheduleSyncService, 
   isGrandPrixCompleted, 
+  isGrandPrixWeekendActive,
   getNextUpcomingGrandPrix, 
   getRaceTargetTimestamp,
   getTimeRemaining,
@@ -206,6 +207,24 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate
         >
           <div className="f1-countdown-tag-row">
             <span className="f1-countdown-pill">R{nextGp.round}</span>
+            {isGrandPrixWeekendActive(nextGp) && (
+              <span style={{
+                background: '#ff1801',
+                color: '#fff',
+                fontSize: '0.62rem',
+                fontWeight: 900,
+                padding: '2px 8px',
+                borderRadius: '4px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                boxShadow: '0 0 10px rgba(255, 24, 1, 0.5)',
+                fontFamily: 'var(--font-mono)',
+              }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#fff' }} />
+                EN CURSO / EN VIVO
+              </span>
+            )}
             <span className="f1-countdown-title">{nextGp.country || nextGp.name}: {t('news_race_tag')}</span>
           </div>
 

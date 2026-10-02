@@ -106,14 +106,58 @@ function formatLapTime(seconds: number): string {
 class OfficialF1Service {
   private baseUrl = 'https://api.openf1.org/v1';
 
+  /**
+   * Resuelve la sesión oficial activa o más reciente en OpenF1:
+   * Realiza GET /sessions?year=current (con fallbacks), ordena cronológicamente por date_start
+   * en orden descendente, y selecciona la sesión más reciente que ya haya comenzado (date_start <= now()).
+   */
+  public async resolveActiveSession(): Promise<OpenF1Session | null> {
+    const currentYear = new Date().getFullYear();
+    const candidateEndpoints = [
+      `${this.baseUrl}/sessions?year=current`,
+      `${this.baseUrl}/sessions?year=${currentYear}`,
+      `${this.baseUrl}/sessions?year=2026`,
+      `${this.baseUrl}/sessions?session_key=latest`,
+      `${this.baseUrl}/sessions`,
+    ];
+
+    for (const url of candidateEndpoints) {
+      try {
+        const res = await fetch(url, { cache: 'no-store' });
+        if (!res.ok) continue;
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const nowMs = Date.now();
+          const sorted = [...data]
+            .filter((s: OpenF1Session) => s && s.session_key && !s.is_cancelled)
+            .sort((a: OpenF1Session, b: OpenF1Session) => {
+              const tA = a.date_start ? new Date(a.date_start).getTime() : 0;
+              const tB = b.date_start ? new Date(b.date_start).getTime() : 0;
+              return tB - tA;
+            });
+
+          if (sorted.length > 0) {
+            const started = sorted.find(s => {
+              const startMs = s.date_start ? new Date(s.date_start).getTime() : 0;
+              return startMs > 0 && startMs <= nowMs;
+            }) || sorted[0];
+
+            return started;
+          }
+        }
+      } catch {
+        // try next endpoint
+      }
+    }
+    return null;
+  }
+
   // Check whether an official session is currently taking place in 2026
   public async checkLiveStatus(): Promise<LiveSessionStatus> {
     try {
-      const res = await fetch(`${this.baseUrl}/sessions?session_key=latest`);
-      if (!res.ok) throw new Error('API network error');
-      const data: OpenF1Session[] = await res.json();
+      const latest = await this.resolveActiveSession();
       
-      if (!data || data.length === 0) {
+      if (!latest) {
         return {
           isLive: false,
           statusMessage: 'No hay sesiones registradas en la temporada 2026',
@@ -127,7 +171,6 @@ class OfficialF1Service {
         };
       }
 
-      const latest = data[0];
       const now = new Date().getTime();
       const startTime = new Date(latest.date_start).getTime();
       const endTime = new Date(latest.date_end).getTime();
@@ -306,6 +349,34 @@ class OfficialF1Service {
       const res = await fetch(`${this.baseUrl}/car_data?session_key=${sessionKey}&driver_number=${driverNumber}`);
       if (!res.ok) return [];
       return await res.json();
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Get all laps for a specific driver in a session
+   */
+  public async getDriverLaps(sessionKey: number | string, driverNumber: number): Promise<OpenF1Lap[]> {
+    try {
+      const res = await fetch(`${this.baseUrl}/laps?session_key=${sessionKey}&driver_number=${driverNumber}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Get all stints for a specific driver in a session
+   */
+  public async getDriverStints(sessionKey: number | string, driverNumber: number): Promise<any[]> {
+    try {
+      const res = await fetch(`${this.baseUrl}/stints?session_key=${sessionKey}&driver_number=${driverNumber}`);
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
     } catch {
       return [];
     }

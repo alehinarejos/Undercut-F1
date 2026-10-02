@@ -22,8 +22,18 @@
       "destination": "/live-timing/index.html"
     },
     {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
+    }
+  ],
+  "crons": [
+    {
+      "path": "/api/cron/session-check",
+      "schedule": "*/5 * * * *"
     }
   ],
   "headers": [

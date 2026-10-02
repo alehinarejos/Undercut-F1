@@ -26,6 +26,7 @@ import { OfficialLeaderboardView } from './components/OfficialLeaderboardView';
 import { GlossaryUndercutView } from './components/GlossaryUndercutView';
 import { F1_SCHEDULE } from './data/schedule';
 import { scheduleSyncService, getNextUpcomingGrandPrix, getGrandPrixTimeline } from './services/scheduleSyncService';
+import { sessionLifecycleService } from './services/sessionLifecycleService';
 import { useLanguage } from './context/LanguageContext';
 import { 
   getRouteFromPathname, 
@@ -283,6 +284,58 @@ export const App: React.FC = () => {
     loadLastSession();
   }, [engine]);
 
+  // Subscribe to autonomous SessionLifecycleService for instant multi-tab & background updates
+  useEffect(() => {
+    const unsubscribeLifecycle = sessionLifecycleService.subscribe((lifecycleState, isTransition) => {
+      const active = lifecycleState.activeSession;
+      if (active && (isTransition || activeSessionKeyRef.current !== active.sessionKey)) {
+        activeSessionKeyRef.current = active.sessionKey;
+        engine.setCircuit(active.circuitId);
+
+        f1LiveWebSocketService.resetForNewSession(
+          active.sessionKey,
+          active.sessionName,
+          active.sessionType,
+          active.remainingSec
+        );
+
+        engine.resetForNewSession(
+          active.sessionName,
+          active.sessionType,
+          active.remainingSec,
+          active.sessionKey
+        );
+
+        const wsLiveEntries = f1LiveWebSocketService.getInitialLeaderboard();
+        if (wsLiveEntries && wsLiveEntries.length > 0) {
+          engine.ingestOfficialLiveEntries(wsLiveEntries);
+        } else {
+          f1LiveWebSocketService.requestFullState();
+        }
+
+        loadedSessionKeyRef.current = null;
+        setLeaderboard(engine.getLeaderboard());
+        setSession(engine.getSession());
+        setIsOfficialLive(true);
+        engine.setSessionEnded(false);
+
+        injectLiveSessionSchema({
+          gpName: active.circuitName,
+          sessionName: active.sessionName,
+          circuitName: active.circuitId,
+          circuitCountry: '',
+          startTimeUtc: active.startTimeUtc,
+          endTimeUtc: active.endTimeUtc,
+          sessionPath: '/live-timing',
+        });
+      }
+    });
+
+    return () => {
+      unsubscribeLifecycle();
+    };
+  }, [engine]);
+
   // Poll every 5 seconds to detect session changes from the schedule and live stream
   useEffect(() => {
     const detectSession = () => {
@@ -290,6 +343,9 @@ export const App: React.FC = () => {
       const wsStatus = f1LiveWebSocketService.getSessionStatus();
       const isWsLive = wsStatus.sessionStatus === 'Started' && !wsStatus.isFinished && !wsStatus.isChequered;
       const isSignalRLive = f1SignalR.getStatus() === 'live_streaming' && !wsStatus.isFinished && !wsStatus.isChequered;
+
+      // Trigger autonomous lifecycle check
+      sessionLifecycleService.checkSessionTransition(false).catch(() => {});
 
       if (active) {
         const key = `${active.gp.circuitId}-${active.sess.type}-${active.sess.startTimeUtc}`;
@@ -881,6 +937,7 @@ export const App: React.FC = () => {
                         isQualifying={session.type === 'QUALIFYING'}
                         sessionType={session.type}
                         sessionName={effectiveSessionName}
+                        sessionId={session.id}
                         timeRemainingSec={effectiveRemainingSec}
                         totalLaps={session.totalLaps}
                         trackStatus={effectiveTrackStatus}

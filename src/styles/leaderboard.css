@@ -21,7 +21,7 @@
 
 .leaderboard-header-row {
   display: grid;
-  grid-template-columns: 28px 112px 64px 60px 80px 80px minmax(336px, 4fr) 46px 54px 54px;
+  grid-template-columns: 28px 112px 64px 60px 80px 80px minmax(300px, 4fr) 46px 54px 54px 34px;
   gap: 8px;
   padding: 6px 12px 6px 8px;
   background: rgba(0, 0, 0, 0.85);
@@ -59,7 +59,7 @@
 
 .leaderboard-row {
   display: grid;
-  grid-template-columns: 28px 112px 64px 60px 80px 80px minmax(336px, 4fr) 46px 54px 54px;
+  grid-template-columns: 28px 112px 64px 60px 80px 80px minmax(300px, 4fr) 46px 54px 54px 34px;
   gap: 8px;
   padding: 0 12px 0 8px;
   height: 48px;
@@ -79,6 +79,33 @@
   flex-shrink: 0;
   overflow: hidden;
   will-change: transform;
+}
+
+.cell-action-modal {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.driver-laps-action-btn {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #94a3b8;
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.driver-laps-action-btn:hover {
+  background: rgba(37, 99, 235, 0.25);
+  border-color: #3b82f6;
+  color: #60a5fa;
+  transform: scale(1.08);
 }
 
 .cell-driver-with-logo {
@@ -586,4 +613,122 @@
 .overtake-alert-text strong {
   color: #00e676;
 }
+
+/* Session Switcher Toolbar */
+.session-switcher-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 3px 6px;
+}
+
+.session-switcher-label {
+  font-family: var(--font-mono);
+  font-size: 0.60rem;
+  font-weight: 800;
+  color: #64748b;
+  letter-spacing: 0.05em;
+  padding: 0 4px;
+}
+
+.session-tab-btn {
+  background: transparent;
+  color: #94a3b8;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 3px 8px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease-in-out;
+}
+
+.session-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f8fafc;
+}
+
+.session-tab-btn.active {
+  background: #e10600;
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.2);
+  box-shadow: 0 0 10px rgba(225, 6, 0, 0.4);
+}
+
+.session-tab-btn .tab-check {
+  color: #00e676;
+  font-size: 0.64rem;
+  font-weight: 900;
+}
+
+.session-tab-btn.active .tab-check {
+  color: #ffffff;
+}
+
+.session-tab-btn .tab-live-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff3b30;
+  box-shadow: 0 0 6px #ff3b30;
+  animation: pulse 1s infinite alternate;
+}
+
+/* Standby Scheduled Banner */
+.session-scheduled-banner {
+  background: linear-gradient(90deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-left: 4px solid #3b82f6;
+  padding: 10px 14px;
+  border-radius: 8px;
+  margin: 8px 10px 10px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.session-scheduled-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.session-scheduled-title {
+  font-weight: 800;
+  font-size: 0.82rem;
+  color: #60a5fa;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-family: var(--font-display);
+}
+
+.session-scheduled-subtitle {
+  font-size: 0.74rem;
+  color: #94a3b8;
+  margin-top: 2px;
+  font-family: var(--font-mono);
+}
+
+.session-scheduled-badge {
+  background: rgba(59, 130, 246, 0.15);
+  color: #93c5fd;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  font-size: 0.66rem;
+  font-weight: 800;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
 

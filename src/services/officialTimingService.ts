@@ -243,32 +243,80 @@ export function buildBaselineOfficialSnapshot(): OfficialSessionSnapshot {
 }
 
 /**
- * Consulta en paralelo los endpoints oficiales de OpenF1 (`session_key=latest`)
+ * Resuelve la sesión oficial activa o más reciente en OpenF1:
+ * Realiza GET /sessions?year=current (con fallbacks), ordena cronológicamente por date_start
+ * en orden descendente, y selecciona la sesión más reciente que ya haya comenzado (date_start <= now()).
+ */
+export async function resolveOpenF1LatestSession(): Promise<any | null> {
+  const currentYear = new Date().getFullYear();
+  const endpoints = [
+    'https://api.openf1.org/v1/sessions?meeting_key=1308',
+    'https://api.openf1.org/v1/sessions?year=current',
+    `https://api.openf1.org/v1/sessions?year=${currentYear}`,
+    'https://api.openf1.org/v1/sessions?year=2026',
+    'https://api.openf1.org/v1/sessions?session_key=latest',
+    'https://api.openf1.org/v1/sessions',
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) continue;
+      const data = await res.json();
+      if (Array.isArray(data) && data.length > 0) {
+        const nowMs = Date.now();
+        // Filtrar y ordenar cronológicamente en orden descendente (más reciente primero)
+        const sorted = [...data]
+          .filter(s => s && s.session_key && !s.is_cancelled)
+          .sort((a, b) => {
+            const tA = a.date_start ? new Date(a.date_start).getTime() : 0;
+            const tB = b.date_start ? new Date(b.date_start).getTime() : 0;
+            return tB - tA;
+          });
+
+        if (sorted.length > 0) {
+          // Seleccionar la sesión más reciente que ya haya comenzado
+          const started = sorted.find(s => {
+            const startMs = s.date_start ? new Date(s.date_start).getTime() : 0;
+            return startMs > 0 && startMs <= nowMs;
+          }) || sorted[0];
+
+          return started;
+        }
+      }
+    } catch {
+      // Intentar siguiente endpoint fallback
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Consulta la sesión oficial resuelta de OpenF1 utilizando su session_key dinámico
  * y Jolpica/Ergast (`/ergast/f1/current/last/results.json`).
  * Si la sesión ha finalizado, congela y persiste los últimos tiempos reales registrados.
  */
 export async function fetchOfficialSessionTiming(): Promise<OfficialSessionSnapshot> {
   try {
-    const [sessionsRes, driversRes, lapsRes, intervalsRes, stintsRes] = await Promise.all([
-      fetch('https://api.openf1.org/v1/sessions?session_key=latest', { cache: 'no-store' }),
-      fetch('https://api.openf1.org/v1/drivers?session_key=latest', { cache: 'no-store' }),
-      fetch('https://api.openf1.org/v1/laps?session_key=latest', { cache: 'no-store' }),
-      fetch('https://api.openf1.org/v1/intervals?session_key=latest', { cache: 'no-store' }),
-      fetch('https://api.openf1.org/v1/stints?session_key=latest', { cache: 'no-store' }),
-    ]);
+    const latestSession = await resolveOpenF1LatestSession();
 
-    if (sessionsRes.ok && driversRes.ok && lapsRes.ok) {
-      const [sessionsData, driversData, lapsData, intervalsData, stintsData] = await Promise.all([
-        sessionsRes.json(),
-        driversRes.json(),
-        lapsRes.json(),
-        intervalsRes.ok ? intervalsRes.json() : Promise.resolve([]),
-        stintsRes.ok ? stintsRes.json() : Promise.resolve([]),
+    if (latestSession && latestSession.session_key) {
+      const sessionKey = latestSession.session_key;
+      const [driversRes, lapsRes, intervalsRes, stintsRes] = await Promise.all([
+        fetch(`https://api.openf1.org/v1/drivers?session_key=${sessionKey}`, { cache: 'no-store' }),
+        fetch(`https://api.openf1.org/v1/laps?session_key=${sessionKey}`, { cache: 'no-store' }),
+        fetch(`https://api.openf1.org/v1/intervals?session_key=${sessionKey}`, { cache: 'no-store' }),
+        fetch(`https://api.openf1.org/v1/stints?session_key=${sessionKey}`, { cache: 'no-store' }),
       ]);
 
-      const latestSession = Array.isArray(sessionsData) && sessionsData.length > 0
-        ? sessionsData[sessionsData.length - 1]
-        : null;
+      if (driversRes.ok && lapsRes.ok) {
+        const [driversData, lapsData, intervalsData, stintsData] = await Promise.all([
+          driversRes.json(),
+          lapsRes.json(),
+          intervalsRes.ok ? intervalsRes.json() : Promise.resolve([]),
+          stintsRes.ok ? stintsRes.json() : Promise.resolve([]),
+        ]);
 
       if (latestSession && Array.isArray(driversData) && driversData.length > 0 && Array.isArray(lapsData) && lapsData.length > 0) {
         const nowMs = Date.now();
@@ -539,7 +587,8 @@ export async function fetchOfficialSessionTiming(): Promise<OfficialSessionSnaps
         return snapshot;
       }
     }
-  } catch (err) {
+  }
+} catch (err) {
     console.warn('[OfficialTimingService] OpenF1 no disponible, consultando Jolpica / Ergast oficial:', err);
   }
 
