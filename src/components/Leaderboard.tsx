@@ -969,22 +969,22 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
         </div>
       )}
 
-      {/* Table Header: POS | PILOTO | GAP | INT | LAST | BEST | SECTORES / STINTS | LAPS | PARADAS | NEUMÁTICO | ESTADO | DATA */}
+      {/* Table Header: POS | DRIVER | GAP | INT | LAST | BEST | SECTORS / STINTS | LAPS | PIT | TYRE | STATUS | DATA */}
       <div className="leaderboard-header-row">
         <span className="col-header-center">POS</span>
-        <span style={{ paddingLeft: '6px' }}>PILOTO</span>
+        <span style={{ paddingLeft: '4px' }}>DRV</span>
         <span className="col-header-center">GAP</span>
         <span className="col-header-center">INT</span>
-        <span className="col-header-center">ÚLTIMA</span>
-        <span className="col-header-center">MEJOR</span>
-        <span className="col-header-center" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px' }}>
-          {viewMode === 'stints' ? 'HISTORIAL DE STINTS Y NEUMÁTICOS' : 'MICROSECTORES (S1 • S2 • S3)'}
+        <span className="col-header-center">LAST</span>
+        <span className="col-header-center">BEST</span>
+        <span className="col-header-center">
+          {viewMode === 'stints' ? 'STINTS' : 'SECTORES'}
         </span>
-        <span className="col-header-center" title="Vueltas completadas">VUEL.</span>
-        <span className="col-header-center" title="Número de paradas en boxes">PARADAS</span>
-        <span className="col-header-center" title="Compuesto actual, edad del neumático y estado">NEUMÁTICO</span>
-        <span className="col-header-center" title="Estado del monoplaza en pista">ESTADO</span>
-        <span className="col-header-center" title="Historial de telemetría y vueltas">DATA</span>
+        <span className="col-header-center" title="Vueltas completadas">LAPS</span>
+        <span className="col-header-center" title="Número de paradas en boxes">PIT</span>
+        <span className="col-header-center" title="Compuesto actual y vueltas">TYRE</span>
+        <span className="col-header-center" title="Estado en pista">EST</span>
+        <span className="col-header-center" title="Historial de vueltas">+</span>
       </div>
 
       {/* Live Overtake Toast Alert */}
@@ -1171,61 +1171,49 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                   {!isOvertakeUp && !isOvertakeDown && (entry.previousPosition - entry.position) < 0 && <span style={{ fontSize: '0.48rem', color: '#ff4444', lineHeight: 1 }}>▼</span>}
                 </div>
 
-                {/* 2. DRIVER (Logo + Solid Team Color Driver Chip + Surname) */}
-                <div className="cell-driver-with-logo" style={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
-                  <TeamLogo team={entry.driver.team} color={teamColor} size={24} />
+                {/* 2. DRIVER (Logo + 3-letter abbreviation only, compact) */}
+                <div className="cell-driver-with-logo" style={{ display: 'flex', alignItems: 'center', gap: '5px', minWidth: 0 }}>
+                  <TeamLogo team={entry.driver.team} color={teamColor} size={20} />
                   <div
                     className="driver-team-chip"
                     style={{
                       backgroundColor: teamColor,
                       color: getContrastTextColor(teamColor),
+                      minWidth: '34px',
+                      height: '20px',
+                      fontSize: '0.80rem',
+                      padding: '0 4px',
                     }}
                     title={`${entry.driver.firstName} ${entry.driver.lastName} (${entry.driver.team})`}
                   >
                     {entry.driver.code}
                   </div>
-                  <span
-                    className="driver-lastname"
-                    style={{
-                      fontFamily: 'var(--font-display)',
-                      fontWeight: 700,
-                      fontSize: '0.78rem',
-                      color: '#f1f5f9',
-                      whiteSpace: 'nowrap',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}
-                    title={`${entry.driver.firstName} ${entry.driver.lastName} (#${entry.driver.number})`}
-                  >
-                    {entry.driver.lastName}
-                  </span>
                 </div>
 
                 {/* 3. GAP */}
-                <div className="cell-gap" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.82rem', fontWeight: 700, color: isLeader ? '#00e676' : '#cbd5e1' }}>
+                <div className="cell-gap" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.76rem', fontWeight: 700, color: isLeader ? '#00e676' : '#cbd5e1' }}>
                   {isLeader && isQualy ? (
-                    <span style={{ color: '#00e676', fontWeight: 900, fontSize: '0.74rem', letterSpacing: '0.04em' }}>POLE</span>
+                    <span style={{ color: '#00e676', fontWeight: 900, fontSize: '0.70rem', letterSpacing: '0.03em' }}>POLE</span>
                   ) : displayedGap}
                 </div>
 
                 {/* 4. INT */}
-                <div className="cell-interval" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.82rem', fontWeight: 700, color: isLeader ? '#64748b' : '#cbd5e1' }}>
+                <div className="cell-interval" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.76rem', fontWeight: 700, color: isLeader ? '#64748b' : '#cbd5e1' }}>
                   {displayedInt}
                 </div>
 
                 {/* 5. LAST */}
-                <div className="cell-lap-single" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.84rem', fontWeight: 700, color: entry.lastLapTime && !isDriverInPit ? '#00e676' : '#94a3b8' }}>
+                <div className="cell-lap-single" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.78rem', fontWeight: 700, color: entry.lastLapTime && !isDriverInPit ? '#00e676' : '#94a3b8' }}>
                   {displayLast}
                 </div>
 
                 {/* 6. BEST (Fastest lap of whole session in PURPLE!) */}
-                <div className="cell-lap-single" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.86rem' }}>
+                <div className="cell-lap-single" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.80rem' }}>
                   {isOverallBestLap ? (
                     <span style={{
                       color: '#d354ff',
                       fontWeight: 900,
-                      textShadow: '0 0 12px rgba(211, 84, 255, 0.6)',
-                      letterSpacing: '0.01em',
+                      textShadow: '0 0 10px rgba(211, 84, 255, 0.55)',
                     }}>
                       {displayBest}
                     </span>
@@ -1244,8 +1232,8 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '6px',
-                      padding: '0 6px',
+                      gap: '4px',
+                      padding: '0 2px',
                       minWidth: 0,
                       overflow: 'hidden',
                     }}
@@ -1270,41 +1258,36 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                             flex: Math.max(1, stint.age || 1),
                             display: 'flex',
                             alignItems: 'center',
-                            justifyContent: 'space-between',
-                            gap: '6px',
-                            padding: '4px 8px',
-                            borderRadius: '6px',
-                            background: 'rgba(255, 255, 255, 0.05)',
+                            justifyContent: 'center',
+                            gap: '4px',
+                            padding: '2px 5px',
+                            borderRadius: '4px',
+                            background: 'rgba(255, 255, 255, 0.04)',
                             border: `1px solid ${stColor}55`,
-                            borderLeft: `3px solid ${stColor}`,
-                            minWidth: '64px',
+                            borderLeft: `2.5px solid ${stColor}`,
+                            minWidth: '42px',
                           }}
                           title={`Stint ${sIdx + 1}: ${stint.compound} (${stint.age} vueltas • ${stint.used ? 'Usado' : 'Nuevo'})`}
                         >
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                            <span
-                              style={{
-                                width: '16px',
-                                height: '16px',
-                                borderRadius: '50%',
-                                border: `2px solid ${stColor}`,
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '0.58rem',
-                                fontWeight: 900,
-                                color: stColor,
-                                fontFamily: 'var(--font-display)',
-                              }}
-                            >
-                              {stint.compound?.[0] || 'S'}
-                            </span>
-                            <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#f8fafc', fontFamily: 'var(--font-mono)' }}>
-                              {stint.age}v
-                            </span>
-                          </div>
-                          <span style={{ fontSize: '0.56rem', fontWeight: 700, color: stint.used ? '#94a3b8' : '#00e676', fontFamily: 'var(--font-mono)' }}>
-                            {stint.used ? 'USADO' : 'NUEVO'}
+                          <span
+                            style={{
+                              width: '14px',
+                              height: '14px',
+                              borderRadius: '50%',
+                              border: `1.5px solid ${stColor}`,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '0.52rem',
+                              fontWeight: 900,
+                              color: stColor,
+                              fontFamily: 'var(--font-display)',
+                            }}
+                          >
+                            {stint.compound?.[0] || 'S'}
+                          </span>
+                          <span style={{ fontSize: '0.66rem', fontWeight: 800, color: '#f8fafc', fontFamily: 'var(--font-mono)' }}>
+                            {stint.age}
                           </span>
                         </div>
                       );
@@ -1338,118 +1321,70 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                 <div className="cell-laps-completed" style={{
                   textAlign: 'center',
                   fontFamily: 'var(--font-mono)',
-                  fontSize: '0.78rem',
-                  fontWeight: 800,
-                  color: '#e2e8f0'
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  color: '#94a3b8'
                 }}>
                   {lapsCount}
                 </div>
 
-                {/* 9. PARADAS (Pit Stops Count) */}
+                {/* 9. PIT (Compact Pit Stops Number) */}
                 <div className="cell-pit-stops" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   <span
                     style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '3px',
-                      minWidth: '38px',
-                      padding: '3px 7px',
-                      borderRadius: '5px',
-                      background: (entry.pitStops || 0) > 0 ? 'rgba(59, 130, 246, 0.16)' : 'rgba(255, 255, 255, 0.04)',
-                      border: `1px solid ${(entry.pitStops || 0) > 0 ? 'rgba(59, 130, 246, 0.38)' : 'rgba(255, 255, 255, 0.08)'}`,
-                      color: (entry.pitStops || 0) > 0 ? '#93c5fd' : '#64748b',
                       fontFamily: 'var(--font-mono)',
-                      fontSize: '0.74rem',
+                      fontSize: '0.72rem',
                       fontWeight: 800,
+                      color: (entry.pitStops || 0) > 0 ? '#60a5fa' : '#64748b',
                     }}
-                    title={`${entry.pitStops || 0} parada(s) en boxes registradas`}
+                    title={`${entry.pitStops || 0} parada(s) en boxes`}
                   >
                     {entry.pitStops ?? 0}
-                    <span style={{ fontSize: '0.54rem', opacity: 0.75, fontWeight: 700 }}>PIT</span>
                   </span>
                 </div>
 
-                {/* 10. NEUMÁTICO (Compound circle + Lap age + New/Used + Previous Stint Dots) */}
+                {/* 10. TYRE (Compact Compound circle + Lap age) */}
                 <div className="cell-tyre-clean" style={{
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '6px',
+                  gap: '4px',
                 }}>
                   {hasTyre ? (
                     <>
-                      {/* Previous stint mini dots if driver has pitted */}
-                      {entry.stints && entry.stints.length > 1 && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} title={`Historial: ${entry.stints.map(s => `${s.compound[0]}(${s.age}v)`).join(' → ')}`}>
-                          {entry.stints.slice(0, -1).slice(-2).map((prevStint, pIdx) => {
-                            const pCol =
-                              prevStint.compound === 'SOFT' ? '#ff3b30' :
-                              prevStint.compound === 'MEDIUM' ? '#ffd60a' :
-                              prevStint.compound === 'HARD' ? '#ffffff' :
-                              prevStint.compound === 'INTERMEDIATE' ? '#34c759' : '#007aff';
-                            return (
-                              <span
-                                key={pIdx}
-                                style={{
-                                  width: '8px',
-                                  height: '8px',
-                                  borderRadius: '50%',
-                                  border: `1.5px solid ${pCol}`,
-                                  background: 'rgba(0,0,0,0.6)',
-                                  display: 'inline-block',
-                                  opacity: 0.75,
-                                }}
-                              />
-                            );
-                          })}
-                        </div>
-                      )}
                       <div
                         style={{
-                          width: '22px',
-                          height: '22px',
+                          width: '18px',
+                          height: '18px',
                           borderRadius: '50%',
-                          border: `2.5px solid ${compColor}`,
+                          border: `2px solid ${compColor}`,
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           flexShrink: 0,
-                          fontSize: '0.68rem',
+                          fontSize: '0.60rem',
                           fontWeight: 900,
                           fontFamily: 'var(--font-display)',
                           color: compColor,
-                          background: 'rgba(0,0,0,0.65)',
-                          boxShadow: `0 0 8px ${compColor}33`,
+                          background: 'rgba(0,0,0,0.55)',
                         }}
                         title={`${entry.tyre.compound} • ${entry.tyre.age} vueltas (${entry.tyre.used ? 'Usado' : 'Nuevo'})`}
                       >
                         {compoundLetter}
                       </div>
-                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.05 }}>
-                        <span style={{
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: '0.74rem',
-                          fontWeight: 800,
-                          color: '#f8fafc',
-                        }}>
-                          {entry.tyre.age}v
-                        </span>
-                        <span style={{
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: '0.52rem',
-                          fontWeight: 700,
-                          color: entry.tyre.used ? '#94a3b8' : '#00e676',
-                          letterSpacing: '0.02em',
-                        }}>
-                          {entry.tyre.used ? 'USADO' : 'NUEVO'}
-                        </span>
-                      </div>
+                      <span style={{
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '0.70rem',
+                        fontWeight: 700,
+                        color: compColor,
+                      }}>
+                        {entry.tyre.age}
+                      </span>
                     </>
                   ) : (
                     <div style={{
-                      width: '18px',
-                      height: '18px',
+                      width: '16px',
+                      height: '16px',
                       borderRadius: '50%',
                       border: '1.5px solid #475569',
                       background: 'rgba(255,255,255,0.03)',
@@ -1457,41 +1392,41 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                   )}
                 </div>
 
-                {/* 11. ESTADO (Track / Pit Status) */}
+                {/* 11. STATUS (Compact Track / Pit Status) */}
                 <div className="cell-pit-status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                   {isCurrentTabFinished ? (
                     <span className="qualy-pit-badge" style={{
-                      background: 'rgba(255, 255, 255, 0.08)',
-                      color: '#cbd5e1',
-                      border: '1px solid rgba(255, 255, 255, 0.2)',
-                      fontSize: '0.58rem',
-                      letterSpacing: '0.04em',
+                      background: 'rgba(255, 255, 255, 0.06)',
+                      color: '#94a3b8',
+                      border: '1px solid rgba(255, 255, 255, 0.14)',
+                      fontSize: '0.54rem',
+                      padding: '1px 4px',
                     }}>
-                      BOX / FIN
+                      FIN
                     </span>
                   ) : isDriverInPit ? (
-                    <span className="qualy-pit-badge">
-                      IN PIT
+                    <span className="qualy-pit-badge" style={{ fontSize: '0.54rem', padding: '1px 4px' }}>
+                      PIT
                     </span>
                   ) : isPushingLap ? (
-                    <span className="qualy-push-badge">
-                      ⚡ PUSH
+                    <span className="qualy-push-badge" style={{ fontSize: '0.54rem', padding: '1px 4px' }}>
+                      PUSH
                     </span>
                   ) : isDriverPitOut ? (
                     <span style={{
-                      background: 'rgba(0, 230, 118, 0.2)',
-                      border: '1px solid rgba(0, 230, 118, 0.45)',
+                      background: 'rgba(0, 230, 118, 0.18)',
+                      border: '1px solid rgba(0, 230, 118, 0.4)',
                       color: '#00e676',
-                      fontSize: '0.58rem',
+                      fontSize: '0.54rem',
                       fontWeight: 800,
-                      padding: '2px 5px',
-                      borderRadius: '4px',
+                      padding: '1px 4px',
+                      borderRadius: '3px',
                       fontFamily: 'var(--font-mono)',
                     }}>
-                      OUT LAP
+                      OUT
                     </span>
                   ) : (
-                    <span className="qualy-track-badge">
+                    <span className="qualy-track-badge" style={{ fontSize: '0.56rem' }}>
                       ● PISTA
                     </span>
                   )}

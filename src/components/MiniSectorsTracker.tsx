@@ -49,7 +49,7 @@ export const SingleSectorBarGroup: React.FC<{
   isFlyingLap?: boolean;
   showTimes?: boolean;
 }> = ({
-  sectorIndex,
+  sectorIndex: _sectorIndex,
   lastTime,
   bestTime,
   status = 'none',
@@ -142,10 +142,10 @@ export const SingleSectorBarGroup: React.FC<{
               key={idx}
               style={{
                 flex: 1,
-                maxWidth: '12px',
+                maxWidth: '10px',
                 minWidth: '3px',
-                height: '8px',
-                borderRadius: '2px',
+                height: '6px',
+                borderRadius: '1.5px',
                 backgroundColor: colorHex,
                 boxShadow: isLeadingHead
                   ? (isPurple
@@ -167,63 +167,33 @@ export const SingleSectorBarGroup: React.FC<{
         })}
       </div>
 
-      {/* Sector times: Clean, spacious layout without visual crowding */}
+      {/* Sector time: compact, centered, no S1/S2/S3 label */}
       {showTimes && (() => {
         const cleanLast = lastTime && lastTime.trim() !== '' && !lastTime.includes('-') ? lastTime : '';
         const cleanBest = bestTime && bestTime.trim() !== '' && !bestTime.includes('-') ? bestTime : '';
         const primaryTime = cleanLast || cleanBest || '—';
-        const showSeparateBest = Boolean(cleanBest && cleanLast && cleanBest !== cleanLast);
 
         return (
           <div
             style={{
               display: 'flex',
               alignItems: 'center',
-              justifyContent: showSeparateBest ? 'space-between' : 'center',
-              gap: '6px',
-              marginTop: '3px',
-              padding: '0 2px',
+              justifyContent: 'center',
+              marginTop: '2px',
               whiteSpace: 'nowrap',
+              lineHeight: 1,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-              <span
-                style={{
-                  fontSize: '0.56rem',
-                  fontFamily: 'var(--font-mono)',
-                  color: '#64748b',
-                  fontWeight: 800,
-                  letterSpacing: '0.03em',
-                }}
-              >
-                S{sectorIndex}
-              </span>
-              <span
-                style={{
-                  fontSize: '0.74rem',
-                  fontFamily: 'var(--font-mono)',
-                  color: cleanLast ? lastColor : bestColor,
-                  fontWeight: 800,
-                  letterSpacing: '0.01em',
-                }}
-              >
-                {primaryTime}
-              </span>
-            </div>
-
-            {showSeparateBest && (
-              <span
-                style={{
-                  fontSize: '0.62rem',
-                  fontFamily: 'var(--font-mono)',
-                  color: bestStatus === 'purple' ? '#d946ef' : '#94a3b8',
-                  fontWeight: 700,
-                }}
-                title={`Mejor Sector ${sectorIndex}: ${cleanBest}`}
-              >
-                PB {cleanBest}
-              </span>
-            )}
+            <span
+              style={{
+                fontSize: '0.68rem',
+                fontFamily: 'var(--font-mono)',
+                color: cleanLast ? lastColor : bestColor,
+                fontWeight: 800,
+              }}
+            >
+              {primaryTime}
+            </span>
           </div>
         );
       })()}
@@ -295,8 +265,8 @@ export const MiniSectorsTracker: React.FC<MiniSectorsTrackerProps> = ({
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '14px',
-        padding: '0 6px',
+        gap: '10px',
+        padding: '0 2px',
         minWidth: 0,
         flex: 1,
       }}
