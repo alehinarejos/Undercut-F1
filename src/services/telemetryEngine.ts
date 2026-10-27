@@ -14,6 +14,7 @@ import type {
 import { DRIVERS } from '../data/drivers';
 import { CIRCUITS, CIRCUIT_MAP } from '../data/circuits';
 import { RACE_RESULTS_2026 } from '../data/raceResults2026';
+import { LIVE_QUALIFYING_RESULTS, convertOfficialResultsToLeaderboardEntries } from '../data/officialWeekendSessions';
 import { getNextUpcomingGrandPrix, getGrandPrixTimeline, scheduleSyncService } from './scheduleSyncService';
 import type { LiveCarTelemetry } from './f1LiveWebSocketService';
 import { fetchOfficialSessionTiming } from './officialTimingService';
@@ -248,21 +249,17 @@ export class TelemetryEngine {
     const sessTypeLabel = sessObj?.name || 'Libres 1 (FP1)';
     const sessCode = sessObj?.type || 'FP1';
     const currentSessionKey = `${activeCircuitId}-${sessCode}-${sessObj?.startTimeUtc || 'default'}`;
-    const isPractice2 = /fp2|practice 2|libres 2/i.test(sessTypeLabel) || sessCode === 'FP2';
-
-    // Calculate baseline lap time scaled to circuit length (~18.2s per km)
-    const lapPaceSec = Math.max(68, Math.round((activeCircuit.lengthKm || 5.0) * 18.2 * 10) / 10);
 
     const initialRemSec = timeline.activeSession
       ? Math.max(60, Math.floor((timeline.activeSession.endTime - Date.now()) / 1000))
-      : 2700;
+      : 0;
 
     this.session = {
       id: currentSessionKey,
       circuit: activeCircuit,
       type: sessCode === 'Race' ? 'RACE' : sessCode === 'Sprint' ? 'SPRINT' : (sessCode === 'Qualifying' || sessCode === 'Sprint Qualifying') ? 'QUALIFYING' : 'PRACTICE',
       name: `${activeGp?.name || activeCircuit.name} - ${sessTypeLabel}`,
-      trackStatus: 'GREEN',
+      trackStatus: timeline.activeSession ? 'GREEN' : 'CHEQUERED',
       currentLap: 14,
       totalLaps: sessCode === 'Race' ? (activeCircuit.laps || 55) : 0,
       timeRemainingSec: initialRemSec,
@@ -277,89 +274,21 @@ export class TelemetryEngine {
       redFlagDeployed: false,
       drsEnabled: true,
     };
-    this.sessionEnded = false;
+    this.sessionEnded = !timeline.activeSession;
 
-    // Realistic lap times scaled per driver
-    const offset = isPractice2 ? -0.160 : 0;
-    const baseLapTimes = [
-      Number((lapPaceSec + 0.120 + offset).toFixed(3)),
-      Number((lapPaceSec + 0.245 + offset).toFixed(3)),
-      Number((lapPaceSec + 0.370 + offset).toFixed(3)),
-      Number((lapPaceSec + 0.455 + offset).toFixed(3)),
-      Number((lapPaceSec + 0.520 + offset).toFixed(3)),
-      Number((lapPaceSec + 0.660 + offset).toFixed(3)),
-      Number((lapPaceSec + 0.800 + offset).toFixed(3)),
-      Number((lapPaceSec + 0.890 + offset).toFixed(3)),
-      Number((lapPaceSec + 0.985 + offset).toFixed(3)),
-      Number((lapPaceSec + 1.070 + offset).toFixed(3)),
-      Number((lapPaceSec + 1.220 + offset).toFixed(3)),
-      Number((lapPaceSec + 1.300 + offset).toFixed(3)),
-      Number((lapPaceSec + 1.390 + offset).toFixed(3)),
-      Number((lapPaceSec + 1.485 + offset).toFixed(3)),
-      Number((lapPaceSec + 1.590 + offset).toFixed(3)),
-      Number((lapPaceSec + 1.710 + offset).toFixed(3)),
-      Number((lapPaceSec + 1.840 + offset).toFixed(3)),
-      Number((lapPaceSec + 1.970 + offset).toFixed(3)),
-      Number((lapPaceSec + 2.100 + offset).toFixed(3)),
-      Number((lapPaceSec + 2.250 + offset).toFixed(3)),
-      Number((lapPaceSec + 2.420 + offset).toFixed(3)),
-      Number((lapPaceSec + 2.630 + offset).toFixed(3)),
-    ];
-
-    const speedTraps = [
-      354, 353, 352, 351, 351, 350, 349, 350, 348, 349,
-      347, 347, 348, 346, 345, 346, 347, 344, 345, 344, 343, 344
-    ];
-
-    const initialProgressMap: number[] = [
-      0.88, 0.74, 0.62, 0.50, 0.38, 0.26, 0.16, 0.04, 0.94, 0.80,
-      0.68, 0.56, 0.44, 0.32, 0.20, 0.10, 0.98, 0.86, 0.00, 0.00, 0.00, 0.00
-    ];
-
-    // 1. Check if latest session results exist in localStorage FOR THIS EXACT SESSION KEY
+    // 1. Check if latest session results exist in localStorage
     let savedLiveEntries: LeaderboardEntry[] | null = null;
-    let savedBestSectors: Record<string, { s1?: string; s2?: string; s3?: string; bestLap?: string }> = {};
     if (typeof window !== 'undefined') {
       try {
-        const storedSessionKey = localStorage.getItem('f1_active_session_key_v4');
-        if (storedSessionKey !== currentSessionKey) {
-          // Session has changed! Archive previous session's best lap to weekend fastest before clearing
-          const prevRaw = localStorage.getItem('f1_official_latest_session_v4');
-          if (prevRaw) {
-            const prevParsed = JSON.parse(prevRaw);
-            if (Array.isArray(prevParsed) && !this.isSyntheticLeaderboard(prevParsed) && prevParsed[0]?.bestLapTime) {
-              const prevBestSec = this.parseLapTimeToSeconds(prevParsed[0].bestLapTime);
-              if (prevBestSec >= 98 && prevBestSec < 200) {
-                const wkKey = `f1_weekend_fastest_v2_${activeCircuitId}`;
-                localStorage.setItem(wkKey, JSON.stringify({
-                  sec: prevBestSec,
-                  driverCode: prevParsed[0].driver?.code || 'LEC',
-                  sessionLabel: 'Libres 1 (FP1)',
-                }));
-              }
-            }
-          }
-          localStorage.removeItem('f1_official_latest_session_v4');
-          localStorage.removeItem('f1_session_best_sectors_v4');
-          localStorage.setItem('f1_active_session_key_v4', currentSessionKey);
-          this.driverLiveSectors.clear();
-        } else {
-          const raw = localStorage.getItem('f1_official_latest_session_v4');
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            if (this.isSyntheticLeaderboard(parsed)) {
-              localStorage.removeItem('f1_official_latest_session_v4');
-              localStorage.removeItem('f1_session_best_sectors_v4');
-            } else if (Array.isArray(parsed) && parsed.length > 0) {
-              const rawSectors = localStorage.getItem('f1_session_best_sectors_v4');
-              if (rawSectors) {
-                savedBestSectors = JSON.parse(rawSectors) || {};
-              }
-              const cleaned = this.sanitizeDriverRosterInEntries(parsed);
-              const leaderSec = this.parseLapTimeToSeconds(cleaned[0]?.bestLapTime);
-              if (activeCircuit.id !== 'baku' || leaderSec >= 98) {
-                savedLiveEntries = cleaned;
-              }
+        const raw = localStorage.getItem('f1_official_latest_session_v5');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (!this.isSyntheticLeaderboard(parsed) && Array.isArray(parsed) && parsed.length > 0) {
+            const cleaned = this.sanitizeDriverRosterInEntries(parsed);
+            // Validate that s3Time is realistic (> 10s) so old corrupted entries are never used
+            const s3Check = parseFloat(cleaned[0]?.s3Time || '25');
+            if (!isNaN(s3Check) && s3Check >= 12) {
+              savedLiveEntries = cleaned;
             }
           }
         }
@@ -369,110 +298,10 @@ export class TelemetryEngine {
     }
 
     if (savedLiveEntries && savedLiveEntries.length > 0) {
-      // Restore & lock best sector times from savedBestSectors so reloads never reset best sectors
-      savedLiveEntries.forEach((entry, idx) => {
-        const numStr = String(entry.driver.number);
-        const savedBest = savedBestSectors[numStr];
-        const fallbackS1 = (35.840 + (idx * 0.045)).toFixed(3);
-        const fallbackS2 = (41.120 + (idx * 0.050)).toFixed(3);
-        const fallbackS3 = (25.380 + (idx * 0.030)).toFixed(3);
-
-        const s1Best = savedBest?.s1 || entry.s1BestTime || entry.s1Time || fallbackS1;
-        const s2Best = savedBest?.s2 || entry.s2BestTime || entry.s2Time || fallbackS2;
-        const s3Best = savedBest?.s3 || entry.s3BestTime || entry.s3Time || fallbackS3;
-
-        entry.s1BestTime = s1Best;
-        entry.s2BestTime = s2Best;
-        entry.s3BestTime = s3Best;
-        if (!entry.s1Time) entry.s1Time = s1Best;
-        if (!entry.s2Time) entry.s2Time = s2Best;
-        if (!entry.s3Time) entry.s3Time = s3Best;
-      });
-
       this.leaderboard = savedLiveEntries;
     } else {
-      // Latest session grid for Baku FP1 (with persistent best sectors)
-      this.leaderboard = DRIVERS.map((driver, idx) => {
-        const baseSec = baseLapTimes[idx] || 103.500;
-        const s1Val = Number((35.840 + (idx * 0.045)).toFixed(3));
-        const s2Val = Number((idx === 1 ? 41.085 : 41.120 + (idx * 0.050)).toFixed(3));
-        const s3Val = Number((baseSec - s1Val - s2Val).toFixed(3));
-        const s1 = s1Val.toFixed(3);
-        const s2 = s2Val.toFixed(3);
-        const s3 = s3Val.toFixed(3);
-        const numStr = String(driver.number);
-        const savedBest = savedBestSectors[numStr];
-        const s1Best = savedBest?.s1 || s1;
-        const s2Best = savedBest?.s2 || s2;
-        const s3Best = savedBest?.s3 || s3;
-
-        savedBestSectors[numStr] = {
-          s1: s1Best,
-          s2: s2Best,
-          s3: s3Best,
-          bestLap: this.formatLapTime(baseSec),
-        };
-
-        const intervalNum = idx === 0 ? 0 : Number((baseLapTimes[idx] - baseLapTimes[idx - 1]).toFixed(3));
-        const gapLeaderNum = Number((baseSec - baseLapTimes[0]).toFixed(3));
-        const isInPit = idx >= 18; // 4 cars in pits
-        const tyreAge = idx === 0 ? 4 : idx === 1 ? 4 : idx === 2 ? 6 : ((idx * 2 + 2) % 7) + 2;
-
-        return {
-          position: idx + 1,
-          previousPosition: idx + 1,
-          driver: {
-            id: driver.id,
-            code: driver.code,
-            number: driver.number,
-            firstName: driver.firstName,
-            lastName: driver.lastName,
-            team: driver.team,
-            teamColor: driver.teamColor,
-            country: driver.country,
-            flag: driver.flag,
-          },
-          gapToLeader: idx === 0 ? 'LÍDER' : `+${gapLeaderNum.toFixed(3)}s`,
-          gapToAhead: idx === 0 ? 'LEADER' : `+${intervalNum.toFixed(3)}s`,
-          intervalNum: intervalNum,
-          currentLapTime: this.formatLapTime(baseSec),
-          bestLapTime: this.formatLapTime(baseSec),
-          lastLapTime: this.formatLapTime(baseSec),
-          s1Time: s1,
-          s2Time: s2,
-          s3Time: s3,
-          s1BestTime: s1Best,
-          s2BestTime: s2Best,
-          s3BestTime: s3Best,
-          s1Status: idx === 0 ? 'purple' : idx < 3 ? 'green' : 'yellow',
-          s2Status: idx === 1 ? 'purple' : idx < 4 ? 'green' : 'yellow',
-          s3Status: idx === 0 ? 'purple' : idx < 3 ? 'green' : 'yellow',
-          s1Segments: this.buildInitialSegments(8, idx === 0 ? 'purple' : idx < 3 ? 'green' : 'yellow'),
-          s2Segments: this.buildInitialSegments(8, idx === 1 ? 'purple' : idx < 4 ? 'green' : 'yellow'),
-          s3Segments: this.buildInitialSegments(9, idx === 0 ? 'purple' : idx < 3 ? 'green' : 'yellow'),
-          tyre: {
-            compound: idx === 2 || idx === 6 ? 'MEDIUM' : idx === 7 ? 'HARD' : 'SOFT',
-            age: tyreAge,
-            used: tyreAge > 1,
-          },
-          pitStops: isInPit ? 1 : 0,
-          inPit: isInPit,
-          isPitOut: false,
-          isKnockedOut: false,
-          isEliminationRisk: false,
-          speedTrap: speedTraps[idx] || 350,
-          lastLapTimeNum: baseSec,
-          trackProgress: initialProgressMap[idx] !== undefined ? initialProgressMap[idx] : (1.0 - idx * 0.04 + 1.0) % 1.0,
-          lapsCompleted: idx >= 17 ? 17 : 18,
-        };
-      });
-
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('f1_session_best_sectors_v4', JSON.stringify(savedBestSectors));
-          localStorage.setItem('f1_official_latest_session_v4', JSON.stringify(this.leaderboard));
-        } catch {}
-      }
+      // Load consolidated official last session results until live stream or OpenF1 updates
+      this.leaderboard = convertOfficialResultsToLeaderboardEntries(LIVE_QUALIFYING_RESULTS);
     }
 
     // Populate telemetry curves
@@ -922,8 +751,6 @@ export class TelemetryEngine {
     this.circuit = circuit;
     this.session.circuit = circuit;
     this.session.totalLaps = circuit.laps;
-    this.session.name = `Gran Premio de ${circuit.country}`;
-    this.loadMadridSession(circuit.id);
     this.emitCurrentState();
   }
 
@@ -1393,23 +1220,9 @@ export class TelemetryEngine {
           bestLap: e.bestLapTime || cur.bestLap,
         };
       }
-      localStorage.setItem('f1_session_best_sectors_v4', JSON.stringify(bestMap));
-      localStorage.setItem('f1_official_latest_session_v4', JSON.stringify(this.leaderboard));
+      localStorage.setItem('f1_session_best_sectors_v5', JSON.stringify(bestMap));
+      localStorage.setItem('f1_official_latest_session_v5', JSON.stringify(this.leaderboard));
     } catch {}
-  }
-
-  private buildInitialSegments(count: number, status: SectorStatus): SectorStatus[] {
-    const res: SectorStatus[] = [];
-    for (let i = 0; i < count; i++) {
-      if (status === 'purple') {
-        res.push(i % 6 === 1 ? 'green' : 'purple');
-      } else if (status === 'green') {
-        res.push(i % 5 === 2 ? 'purple' : i % 5 === 0 ? 'yellow' : 'green');
-      } else {
-        res.push(i % 4 === 1 ? 'green' : 'yellow');
-      }
-    }
-    return res;
   }
 
   public setListeners(listeners: EngineListeners) {
@@ -2362,18 +2175,6 @@ export class TelemetryEngine {
     const secs = (totalSeconds % 60).toFixed(3);
     const paddedSecs = Number(secs) < 10 ? `0${secs}` : secs;
     return `${mins}:${paddedSecs}`;
-  }
-
-  private parseLapTimeToSeconds(lapTimeStr?: string): number {
-    if (!lapTimeStr || lapTimeStr === 'DNF' || lapTimeStr === 'LÍDER' || lapTimeStr === 'LEADER') return 999;
-    const parts = lapTimeStr.split(':');
-    if (parts.length === 2) {
-      const min = parseFloat(parts[0]);
-      const sec = parseFloat(parts[1]);
-      if (!isNaN(min) && !isNaN(sec)) return min * 60 + sec;
-    }
-    const val = parseFloat(lapTimeStr);
-    return isNaN(val) ? 999 : val;
   }
 
   private getCurrentTimeString(): string {

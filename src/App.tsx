@@ -279,6 +279,32 @@ export const App: React.FC = () => {
         const latest = await officialF1Api.checkLiveStatus();
         const targetSession = latest.activeSession || latest.latestCompletedSession;
         if (targetSession?.session_key) {
+          const rawName = targetSession.session_name || '';
+          const rawType = (targetSession.session_type || rawName).toLowerCase();
+          const sessType: SessionState['type'] =
+            rawType.includes('race') ? 'RACE' :
+            rawType.includes('sprint') && !rawType.includes('qual') ? 'SPRINT' :
+            rawType.includes('qual') ? 'QUALIFYING' : 'PRACTICE';
+          const gpLabel = targetSession.country_name || targetSession.circuit_short_name || '';
+          const fullSessName = gpLabel && rawName ? `GP ${gpLabel} - ${rawName}` : (rawName || undefined);
+
+          if (!latest.isLive) {
+            engine.setSessionEnded(true);
+            engine.updateLiveSessionState({
+              name: fullSessName,
+              type: sessType,
+              trackStatus: 'CHEQUERED',
+              timeRemainingSec: 0,
+            });
+            setSession(prev => ({
+              ...prev,
+              name: fullSessName || prev.name,
+              type: sessType,
+              trackStatus: 'CHEQUERED',
+              timeRemainingSec: 0,
+            }));
+          }
+
           await loadRealSessionData(targetSession.session_key, targetSession.meeting_key);
         }
       } catch (e) {
@@ -444,7 +470,7 @@ export const App: React.FC = () => {
           }));
         }
       } else {
-        // No official session live right now — check if a session finished recently (< 90 min ago)
+        // No official session live right now — stay frozen on the last completed session until the next session starts
         const upcomingGp = getNextUpcomingGrandPrix(scheduleSyncService.getState().schedule);
         const timeline = getGrandPrixTimeline(upcomingGp);
         const lastComp = timeline.lastCompletedSession;
@@ -458,35 +484,24 @@ export const App: React.FC = () => {
         setIsOfficialLive(false);
         removeLiveSessionSchema(); // remove LiveBlogPosting when no session is active
 
-        // Dynamically synchronize the circuit and session with the current upcoming Grand Prix
-        if (upcomingGp?.circuitId && engine.getCircuit().id !== upcomingGp.circuitId) {
-          engine.setCircuit(upcomingGp.circuitId);
-          setSession(engine.getSession());
-        }
+        const finishedAt = isRecentlyFinished ? (lastComp?.endTime || nowMs) : undefined;
+        const sessName = lastComp ? `${upcomingGp.name} - ${lastComp.session.name}` : undefined;
 
-        if (isRecentlyFinished) {
-          const finishedAt = lastComp?.endTime || nowMs;
-          const sessName = lastComp ? `${upcomingGp.name} - ${lastComp.session.name}` : undefined;
-          engine.setSessionEnded(true);
-          engine.updateLiveSessionState({
-            name: sessName,
-            timeRemainingSec: 0,
-            trackStatus: 'CHEQUERED',
-            finishedAtMs: finishedAt,
-          });
-          setSession(prev => ({
-            ...prev,
-            name: sessName || prev.name,
-            timeRemainingSec: 0,
-            trackStatus: 'CHEQUERED',
-            finishedAtMs: finishedAt,
-          }));
-        } else {
-          engine.setSessionEnded(false);
-          if (!engine.isEngineRunning()) {
-            engine.start();
-          }
-        }
+        engine.setSessionEnded(true);
+        engine.stop();
+        engine.updateLiveSessionState({
+          ...(sessName ? { name: sessName } : {}),
+          timeRemainingSec: 0,
+          trackStatus: 'CHEQUERED',
+          finishedAtMs: finishedAt,
+        });
+        setSession(prev => ({
+          ...prev,
+          name: sessName || prev.name,
+          timeRemainingSec: 0,
+          trackStatus: 'CHEQUERED',
+          finishedAtMs: finishedAt,
+        }));
       }
     };
 
@@ -720,25 +735,16 @@ export const App: React.FC = () => {
         const parsedFinishedTime = status.finishedUtc ? new Date(status.finishedUtc).getTime() : undefined;
         const now = Date.now();
         const isRecent = Boolean(parsedFinishedTime && !isNaN(parsedFinishedTime) && (now - parsedFinishedTime) >= 0 && (now - parsedFinishedTime) < 30 * 60 * 1000);
+        const finishedAtMs = isRecent ? parsedFinishedTime : undefined;
 
-        if (!isRecent) {
-          setIsOfficialLive(false);
-          setSignalRStatus('connected');
-          setSignalRDetails('Modo Dual • Telemetría Activa');
-          engine.setSessionEnded(false);
-          if (!engine.isEngineRunning()) {
-            engine.start();
-          }
-          return;
-        }
-
-        const finishedAtMs = parsedFinishedTime!;
         setIsOfficialLive(false);
         setSignalRStatus('connected');
         setSignalRDetails('Sesión finalizada');
         engine.setSessionEnded(true);
+        engine.stop();
 
         engine.updateLiveSessionState({
+          ...(status.sessionName ? { name: status.sessionName } : {}),
           trackStatus: 'CHEQUERED',
           timeRemainingSec: 0,
           finishedAtMs,
@@ -746,12 +752,13 @@ export const App: React.FC = () => {
 
         setSession(prev => {
           try {
-            if (typeof window !== 'undefined') {
+            if (typeof window !== 'undefined' && finishedAtMs) {
               localStorage.setItem('f1_session_finished_at_ms', String(finishedAtMs));
             }
           } catch {}
           return {
             ...prev,
+            name: status.sessionName || prev.name,
             trackStatus: 'CHEQUERED',
             timeRemainingSec: 0,
             finishedAtMs,

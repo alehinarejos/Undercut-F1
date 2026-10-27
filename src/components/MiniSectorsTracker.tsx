@@ -167,11 +167,10 @@ export const SingleSectorBarGroup: React.FC<{
         })}
       </div>
 
-      {/* Sector time: compact, centered, no S1/S2/S3 label */}
+      {/* Sector times: Last sector & Best sector side by side (no S1/S2/S3 label) */}
       {showTimes && (() => {
-        const cleanLast = lastTime && lastTime.trim() !== '' && !lastTime.includes('-') ? lastTime : '';
-        const cleanBest = bestTime && bestTime.trim() !== '' && !bestTime.includes('-') ? bestTime : '';
-        const primaryTime = cleanLast || cleanBest || '—';
+        const cleanLast = lastTime && lastTime.trim() !== '' && !lastTime.includes('-') ? lastTime : '—';
+        const cleanBest = bestTime && bestTime.trim() !== '' && !bestTime.includes('-') ? bestTime : (cleanLast !== '—' ? cleanLast : '—');
 
         return (
           <div
@@ -179,6 +178,7 @@ export const SingleSectorBarGroup: React.FC<{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              gap: '4px',
               marginTop: '2px',
               whiteSpace: 'nowrap',
               lineHeight: 1,
@@ -186,13 +186,28 @@ export const SingleSectorBarGroup: React.FC<{
           >
             <span
               style={{
-                fontSize: '0.68rem',
+                fontSize: '0.64rem',
                 fontFamily: 'var(--font-mono)',
-                color: cleanLast ? lastColor : bestColor,
+                color: lastColor,
+                fontWeight: 700,
+              }}
+              title={`Último sector: ${cleanLast}`}
+            >
+              {cleanLast}
+            </span>
+            <span style={{ fontSize: '0.56rem', color: 'rgba(255, 255, 255, 0.25)', fontFamily: 'var(--font-mono)' }}>
+              /
+            </span>
+            <span
+              style={{
+                fontSize: '0.64rem',
+                fontFamily: 'var(--font-mono)',
+                color: bestColor,
                 fontWeight: 800,
               }}
+              title={`Mejor sector: ${cleanBest}`}
             >
-              {primaryTime}
+              {cleanBest}
             </span>
           </div>
         );

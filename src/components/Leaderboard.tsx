@@ -3,12 +3,6 @@ import { Activity } from 'lucide-react';
 import type { LeaderboardEntry } from '../types/telemetry';
 import { TeamLogo } from './TeamLogo';
 import { DriverSessionModal } from './DriverSessionModal';
-import { 
-  OFFICIAL_FP1_RESULTS, 
-  OFFICIAL_FP2_RESULTS, 
-  OFFICIAL_FP3_RESULTS,
-  convertOfficialResultsToLeaderboardEntries 
-} from '../data/officialWeekendSessions';
 import { useLiveSession } from '../context/LiveSessionProvider';
 import { MiniSectorsTracker } from './MiniSectorsTracker';
 import {
@@ -95,54 +89,6 @@ export function buildWeekendSessionTabs(): WeekendSessionMeta[] {
       sessionKey: 11731,
     },
   ];
-}
-
-function createScheduledLeaderboardEntries(template: typeof OFFICIAL_FP2_RESULTS): LeaderboardEntry[] {
-  return template.map((r, idx) => ({
-    position: idx + 1,
-    previousPosition: idx + 1,
-    driver: {
-      id: r.code.toLowerCase(),
-      code: r.code,
-      number: r.driverNumber,
-      firstName: r.firstName,
-      lastName: r.lastName,
-      team: r.team,
-      teamColor: r.teamColor,
-      country: r.country || 'F1',
-      flag: r.country === 'NLD' ? '🇳🇱' : r.country === 'GBR' ? '🇬🇧' : r.country === 'MCO' ? '🇲🇨' : r.country === 'ESP' ? '🇪🇸' : r.country === 'FRA' ? '🇫🇷' : r.country === 'AUS' ? '🇦🇺' : r.country === 'ITA' ? '🇮🇹' : r.country === 'DEU' ? '🇩🇪' : r.country === 'BRA' ? '🇧🇷' : r.country === 'CAN' ? '🇨🇦' : r.country === 'ARG' ? '🇦🇷' : r.country === 'MEX' ? '🇲🇽' : '🏁',
-    },
-    gapToLeader: '—',
-    gapToAhead: '—',
-    intervalNum: 0,
-    currentLapTime: '—',
-    bestLapTime: '—',
-    lastLapTime: '—',
-    lastLapTimeNum: 0,
-    s1Time: '—',
-    s2Time: '—',
-    s3Time: '—',
-    s1BestTime: '—',
-    s2BestTime: '—',
-    s3BestTime: '—',
-    s1Status: 'none',
-    s2Status: 'none',
-    s3Status: 'none',
-    s1Segments: Array(8).fill('none'),
-    s2Segments: Array(8).fill('none'),
-    s3Segments: Array(9).fill('none'),
-    tyre: {
-      compound: 'SOFT',
-      age: 0,
-      used: false,
-    },
-    pitStops: 0,
-    inPit: true,
-    isPitOut: false,
-    speedTrap: 0,
-    trackProgress: 0,
-    lapsCompleted: 0,
-  }));
 }
 
 // Helper to parse lap time to seconds for finding fastest lap
@@ -308,61 +254,29 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
   }, [activePropTab]);
 
   const activeRawEntries = useMemo(() => {
-    // 1. If viewing the currently active session tab passed from App.tsx, use live propEntries
-    if (selectedSessionTab === activePropTab && propEntries && propEntries.length > 0) {
+    // Always follow the single live / latest completed session
+    if (propEntries && propEntries.length > 0) {
       return propEntries;
     }
-
-    // 2. Live Qualifying tab fallback
-    if (selectedSessionTab === 'QUALIFYING') {
-      return propEntries && propEntries.length > 0 ? propEntries : ssotLeaderboard;
-    }
-
-    // 3. Completed practice sessions
-    if (selectedSessionTab === 'FP3') {
-      return convertOfficialResultsToLeaderboardEntries(OFFICIAL_FP3_RESULTS);
-    }
-    if (selectedSessionTab === 'FP1') {
-      return convertOfficialResultsToLeaderboardEntries(OFFICIAL_FP1_RESULTS);
-    }
-    if (selectedSessionTab === 'FP2') {
-      return convertOfficialResultsToLeaderboardEntries(OFFICIAL_FP2_RESULTS);
-    }
-
-    // 4. Race tab: if propEntries has race data, use it; otherwise scheduled grid
-    if (propEntries && propEntries.length > 0 && activePropTab === 'RACE') {
-      return propEntries;
-    }
-    return createScheduledLeaderboardEntries(OFFICIAL_FP2_RESULTS);
-  }, [selectedSessionTab, activePropTab, propEntries, ssotLeaderboard]);
+    return ssotLeaderboard;
+  }, [propEntries, ssotLeaderboard]);
 
   const entries = useMemo(() => {
     if (!Array.isArray(activeRawEntries)) return [];
-    // Ensure all 22 official drivers in the grid are preserved without filtering anyone out
     const result: LeaderboardEntry[] = [];
     for (const e of activeRawEntries) {
       if (!e || !e.driver) continue;
       result.push(e);
     }
     const sorted = [...result].sort((a, b) => {
-      // 1. In timed sessions (practice/qualy), sort by best lap time (fastest first)
-      const timeA = parseLapTimeToSec(a.bestLapTime || a.lastLapTime);
-      const timeB = parseLapTimeToSec(b.bestLapTime || b.lastLapTime);
-      const hasTimeA = timeA !== Infinity && timeA > 0;
-      const hasTimeB = timeB !== Infinity && timeB > 0;
-
-      // Drivers WITH a completed lap always come ahead of drivers WITHOUT a time
-      if (hasTimeA && !hasTimeB) return -1;
-      if (!hasTimeA && hasTimeB) return 1;
-      if (hasTimeA && hasTimeB) {
-        if (timeA !== timeB) return timeA - timeB;
-      }
-
-      // If positions are valid and distinct, order by real position
+      // Preserve official classification order (position 1..22) from F1 Live Timing / OpenF1
       if (a.position && b.position && a.position !== b.position) {
         return a.position - b.position;
       }
-      return (a.position || a.driver.number || 99) - (b.position || b.driver.number || 99);
+      const timeA = parseLapTimeToSec(a.bestLapTime || a.lastLapTime);
+      const timeB = parseLapTimeToSec(b.bestLapTime || b.lastLapTime);
+      if (timeA !== timeB) return timeA - timeB;
+      return (a.driver.number || 99) - (b.driver.number || 99);
     });
 
     return sorted.map((e, idx) => ({
@@ -546,19 +460,16 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
   const gpTimeline = useMemo(() => getGrandPrixTimeline(upcomingGp), [upcomingGp, sessionName, trackStatus]);
   const isAnySessionLiveNow = Boolean(gpTimeline.activeSession) || activeSession.status === 'LIVE';
 
-  const currentSessionMeta = weekendSessions.find(s => s.key === selectedSessionTab) || weekendSessions[3];
-  const isScheduledSession = selectedSessionTab === 'RACE' && activePropTab !== 'RACE';
+  const currentSessionMeta = weekendSessions.find(s => s.key === activePropTab) || weekendSessions[3];
+  const isScheduledSession = false;
   const effectiveSessionKey = currentSessionMeta.sessionKey;
 
   const isQualyFinished = !isAnySessionLiveNow || trackStatus === 'CHEQUERED' || (localRemainingSec <= 0 && activeSession.status === 'FINISHED');
-  const isCurrentTabFinished =
-    !isAnySessionLiveNow ||
-    (selectedSessionTab !== activePropTab && (selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2' || selectedSessionTab === 'FP3')) ||
-    (selectedSessionTab === activePropTab && trackStatus === 'CHEQUERED');
+  const isCurrentTabFinished = !isAnySessionLiveNow || trackStatus === 'CHEQUERED';
 
-  const formattedSessionBadge = selectedSessionTab === activePropTab
-    ? (isCurrentTabFinished ? `🏁 RESULTADOS CONSOLIDADOS - ${currentSessionMeta.badgeName}` : `🔴 EN DIRECTO - ${(sessionName || currentSessionMeta.badgeName).toUpperCase()}`)
-    : `🏁 ${currentSessionMeta.badgeName}`;
+  const formattedSessionBadge = isCurrentTabFinished
+    ? `🏁 SESIÓN FINALIZADA - ${(sessionName || currentSessionMeta.badgeName).toUpperCase()}`
+    : `🔴 EN DIRECTO - ${(sessionName || currentSessionMeta.badgeName).toUpperCase()}`;
 
   const formattedRemainingTime = (() => {
     if (isScheduledSession || isCurrentTabFinished) return '00:00';
@@ -793,30 +704,8 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
           </div>
         </div>
 
-        {/* Right Header Area: Session Switcher & Official FIA Timing Badge */}
+        {/* Right Header Area: Official FIA Timing Badge */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <div className="session-switcher-bar">
-            <span className="session-switcher-label">SESIÓN:</span>
-            {weekendSessions.map((sess) => {
-              const isSelected = selectedSessionTab === sess.key;
-              const isCompleted = sess.status === 'completed' || (sess.key !== 'RACE' && !isAnySessionLiveNow);
-              const isLive = sess.status === 'live';
-
-              return (
-                <button
-                  key={sess.key}
-                  className={`session-tab-btn ${isSelected ? 'active' : ''}`}
-                  onClick={() => setSelectedSessionTab(sess.key)}
-                  title={sess.scheduledTime}
-                >
-                  {isCompleted && <span className="tab-check">✓</span>}
-                  {isLive && <span className="tab-live-dot" />}
-                  <span>{sess.label}</span>
-                </button>
-              );
-            })}
-          </div>
-
           <div className="f1-badge badge-green" style={{ fontSize: '0.62rem', padding: '2px 8px' }}>
             OFFICIAL FIA TIMING
           </div>
@@ -969,7 +858,7 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
         </div>
       )}
 
-      {/* Table Header: POS | DRIVER | GAP | INT | LAST | BEST | SECTORS / STINTS | LAPS | PIT | TYRE | STATUS | DATA */}
+      {/* Table Header: POS | DRV | GAP | INT | LAST | BEST | SECTORES (ÚLT / MEJOR) | LAPS | PIT | TYRE | + */}
       <div className="leaderboard-header-row">
         <span className="col-header-center">POS</span>
         <span style={{ paddingLeft: '4px' }}>DRV</span>
@@ -978,12 +867,11 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
         <span className="col-header-center">LAST</span>
         <span className="col-header-center">BEST</span>
         <span className="col-header-center">
-          {viewMode === 'stints' ? 'STINTS' : 'SECTORES'}
+          {viewMode === 'stints' ? 'STINTS' : 'SECTORES (ÚLT / MEJOR)'}
         </span>
         <span className="col-header-center" title="Vueltas completadas">LAPS</span>
         <span className="col-header-center" title="Número de paradas en boxes">PIT</span>
         <span className="col-header-center" title="Compuesto actual y vueltas">TYRE</span>
-        <span className="col-header-center" title="Estado en pista">EST</span>
         <span className="col-header-center" title="Historial de vueltas">+</span>
       </div>
 
@@ -1328,19 +1216,25 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                   {lapsCount}
                 </div>
 
-                {/* 9. PIT (Compact Pit Stops Number) */}
+                {/* 9. PIT (Number of Pit Stops, or IN PIT badge if actively pitting) */}
                 <div className="cell-pit-stops" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <span
-                    style={{
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: '0.72rem',
-                      fontWeight: 800,
-                      color: (entry.pitStops || 0) > 0 ? '#60a5fa' : '#64748b',
-                    }}
-                    title={`${entry.pitStops || 0} parada(s) en boxes`}
-                  >
-                    {entry.pitStops ?? 0}
-                  </span>
+                  {!isCurrentTabFinished && isDriverInPit ? (
+                    <span className="qualy-pit-badge" style={{ fontSize: '0.54rem', padding: '1px 4px' }} title={`${entry.pitStops || 0} parada(s) — En boxes`}>
+                      PIT {entry.pitStops ?? 0}
+                    </span>
+                  ) : (
+                    <span
+                      style={{
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '0.74rem',
+                        fontWeight: 800,
+                        color: (entry.pitStops || 0) > 0 ? '#60a5fa' : '#64748b',
+                      }}
+                      title={`${entry.pitStops || 0} parada(s) en boxes`}
+                    >
+                      {entry.pitStops ?? 0}
+                    </span>
+                  )}
                 </div>
 
                 {/* 10. TYRE (Compact Compound circle + Lap age) */}
@@ -1389,46 +1283,6 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                       border: '1.5px solid #475569',
                       background: 'rgba(255,255,255,0.03)',
                     }} />
-                  )}
-                </div>
-
-                {/* 11. STATUS (Compact Track / Pit Status) */}
-                <div className="cell-pit-status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {isCurrentTabFinished ? (
-                    <span className="qualy-pit-badge" style={{
-                      background: 'rgba(255, 255, 255, 0.06)',
-                      color: '#94a3b8',
-                      border: '1px solid rgba(255, 255, 255, 0.14)',
-                      fontSize: '0.54rem',
-                      padding: '1px 4px',
-                    }}>
-                      FIN
-                    </span>
-                  ) : isDriverInPit ? (
-                    <span className="qualy-pit-badge" style={{ fontSize: '0.54rem', padding: '1px 4px' }}>
-                      PIT
-                    </span>
-                  ) : isPushingLap ? (
-                    <span className="qualy-push-badge" style={{ fontSize: '0.54rem', padding: '1px 4px' }}>
-                      PUSH
-                    </span>
-                  ) : isDriverPitOut ? (
-                    <span style={{
-                      background: 'rgba(0, 230, 118, 0.18)',
-                      border: '1px solid rgba(0, 230, 118, 0.4)',
-                      color: '#00e676',
-                      fontSize: '0.54rem',
-                      fontWeight: 800,
-                      padding: '1px 4px',
-                      borderRadius: '3px',
-                      fontFamily: 'var(--font-mono)',
-                    }}>
-                      OUT
-                    </span>
-                  ) : (
-                    <span className="qualy-track-badge" style={{ fontSize: '0.56rem' }}>
-                      ● PISTA
-                    </span>
                   )}
                 </div>
 
