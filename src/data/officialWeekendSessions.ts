@@ -23,6 +23,7 @@ export interface OfficialSessionDriverResult {
   s1Status: 'purple' | 'green' | 'yellow' | 'none' | 'personal' | 'normal';
   s2Status: 'purple' | 'green' | 'yellow' | 'none' | 'personal' | 'normal';
   s3Status: 'purple' | 'green' | 'yellow' | 'none' | 'personal' | 'normal';
+  trackStatus?: 'PUSH' | 'ON_TRACK' | 'PIT' | 'OUT';
 }
 
 export const OFFICIAL_FP1_RESULTS: OfficialSessionDriverResult[] = [
@@ -1043,50 +1044,173 @@ export const OFFICIAL_FP2_RESULTS: OfficialSessionDriverResult[] = [
   }
 ];
 
-export function convertOfficialResultsToLeaderboardEntries(results: OfficialSessionDriverResult[]): LeaderboardEntry[] {
-  return results.map((r, idx) => ({
-    position: r.position,
-    previousPosition: r.position,
-    driver: {
-      id: r.code.toLowerCase(),
-      code: r.code,
-      number: r.driverNumber,
-      firstName: r.firstName,
-      lastName: r.lastName,
-      team: r.team,
-      teamColor: r.teamColor,
-      country: r.country || 'F1',
-      flag: r.country === 'NLD' ? '🇳🇱' : r.country === 'GBR' ? '🇬🇧' : r.country === 'MCO' ? '🇲🇨' : r.country === 'ESP' ? '🇪🇸' : r.country === 'FRA' ? '🇫🇷' : r.country === 'AUS' ? '🇦🇺' : r.country === 'ITA' ? '🇮🇹' : r.country === 'DEU' ? '🇩🇪' : r.country === 'BRA' ? '🇧🇷' : r.country === 'CAN' ? '🇨🇦' : r.country === 'ARG' ? '🇦🇷' : r.country === 'MEX' ? '🇲🇽' : '🏁',
-    },
-    gapToLeader: r.gapToLeader,
-    gapToAhead: r.intervalToAhead,
-    intervalNum: idx === 0 ? 0 : parseFloat(r.intervalToAhead.replace(/[+s]/g, '')) || 0,
-    currentLapTime: r.bestLapTime,
-    bestLapTime: r.bestLapTime,
-    lastLapTime: r.bestLapTime,
-    lastLapTimeNum: r.bestLapSec,
-    s1Time: r.s1,
-    s2Time: r.s2,
-    s3Time: r.s3,
-    s1BestTime: r.s1,
-    s2BestTime: r.s2,
-    s3BestTime: r.s3,
-    s1Status: r.s1Status === 'purple' ? 'purple' : r.s1Status === 'personal' ? 'green' : 'yellow',
-    s2Status: r.s2Status === 'purple' ? 'purple' : r.s2Status === 'personal' ? 'green' : 'yellow',
-    s3Status: r.s3Status === 'purple' ? 'purple' : r.s3Status === 'personal' ? 'green' : 'yellow',
-    s1Segments: Array(8).fill(r.s1Status === 'purple' ? 'purple' : 'green'),
-    s2Segments: Array(8).fill(r.s2Status === 'purple' ? 'purple' : 'green'),
-    s3Segments: Array(9).fill(r.s3Status === 'purple' ? 'purple' : 'green'),
-    tyre: {
-      compound: (r.compound.toUpperCase().includes('SOFT') ? 'SOFT' : r.compound.toUpperCase().includes('HARD') ? 'HARD' : 'MEDIUM') as any,
-      age: Math.max(1, r.lapsCompleted),
-      used: true,
-    },
-    pitStops: 1,
-    inPit: true,
-    isPitOut: false,
-    speedTrap: 310 + (idx % 12),
-    trackProgress: 1,
-    lapsCompleted: r.lapsCompleted,
-  }));
+export function convertOfficialResultsToLeaderboardEntries(
+  results: OfficialSessionDriverResult[],
+  forceFinished: boolean = false
+): LeaderboardEntry[] {
+  return results.map((r, idx) => {
+    const isPush = !forceFinished && r.trackStatus === 'PUSH';
+    const isOnTrack = !forceFinished && r.trackStatus === 'ON_TRACK';
+    const isFlyingLap = isPush || isOnTrack;
+
+    // Stagger initial on-track cars along the lap only when session is actively live
+    const initialProgress = forceFinished
+      ? 1.0
+      : isPush
+      ? (r.code === 'VER' ? 0.74 : r.code === 'HAM' ? 0.44 : r.code === 'HAD' ? 0.18 : r.code === 'COL' ? 0.88 : 0.50)
+      : isOnTrack
+      ? (r.code === 'NOR' ? 0.52 : r.code === 'ANT' ? 0.28 : r.code === 'ALO' ? 0.64 : r.code === 'ALB' ? 0.80 : r.code === 'LIN' ? 0.14 : r.code === 'BOR' ? 0.36 : 0.08)
+      : 1.0;
+
+    const s1Stat = r.s1Status === 'purple' ? 'purple' : r.s1Status === 'personal' ? 'green' : 'yellow';
+    const s2Stat = r.s2Status === 'purple' ? 'purple' : r.s2Status === 'personal' ? 'green' : 'yellow';
+    const s3Stat = r.s3Status === 'purple' ? 'purple' : r.s3Status === 'personal' ? 'green' : 'yellow';
+
+    const s1Segments: ('purple' | 'green' | 'yellow' | 'pit' | 'none')[] = Array(8).fill('none');
+    const s2Segments: ('purple' | 'green' | 'yellow' | 'pit' | 'none')[] = Array(8).fill('none');
+    const s3Segments: ('purple' | 'green' | 'yellow' | 'pit' | 'none')[] = Array(9).fill('none');
+
+    // Fill with consolidated sector best statuses
+    s1Segments.fill(s1Stat);
+    s2Segments.fill(s2Stat);
+    s3Segments.fill(s3Stat);
+
+    if (!forceFinished && isFlyingLap) {
+      const paceColor = isPush ? (r.s1Status === 'purple' || r.s2Status === 'purple' || r.s3Status === 'purple' ? 'purple' : 'green') : 'yellow';
+      if (initialProgress < 0.32) {
+        const segIdx = Math.min(7, Math.floor((initialProgress / 0.32) * 8));
+        for (let i = 0; i <= segIdx; i++) s1Segments[i] = paceColor;
+      } else if (initialProgress < 0.68) {
+        s1Segments.fill(r.s1Status === 'purple' ? 'purple' : 'green');
+        const segIdx = Math.min(7, Math.floor(((initialProgress - 0.32) / 0.36) * 8));
+        for (let i = 0; i <= segIdx; i++) s2Segments[i] = paceColor;
+      } else {
+        s1Segments.fill(r.s1Status === 'purple' ? 'purple' : 'green');
+        s2Segments.fill(r.s2Status === 'purple' ? 'purple' : 'green');
+        const segIdx = Math.min(8, Math.floor(((initialProgress - 0.68) / 0.32) * 9));
+        for (let i = 0; i <= segIdx; i++) s3Segments[i] = paceColor;
+      }
+    }
+
+    return {
+      position: r.position,
+      previousPosition: r.position,
+      driver: {
+        id: r.code.toLowerCase(),
+        code: r.code,
+        number: r.driverNumber,
+        firstName: r.firstName,
+        lastName: r.lastName,
+        team: r.team,
+        teamColor: r.teamColor,
+        country: r.country || 'F1',
+        flag: r.country === 'NLD' ? '🇳🇱' : r.country === 'GBR' ? '🇬🇧' : r.country === 'MCO' ? '🇲🇨' : r.country === 'ESP' ? '🇪🇸' : r.country === 'FRA' ? '🇫🇷' : r.country === 'AUS' ? '🇦🇺' : r.country === 'ITA' ? '🇮🇹' : r.country === 'DEU' ? '🇩🇪' : r.country === 'BRA' ? '🇧🇷' : r.country === 'CAN' ? '🇨🇦' : r.country === 'ARG' ? '🇦🇷' : r.country === 'MEX' ? '🇲🇽' : '🏁',
+      },
+      gapToLeader: r.gapToLeader,
+      gapToAhead: r.intervalToAhead,
+      intervalNum: idx === 0 ? 0 : parseFloat(r.intervalToAhead.replace(/[+s]/g, '')) || 0,
+      currentLapTime: forceFinished ? r.bestLapTime : (isPush ? 'PUSH' : r.bestLapTime),
+      bestLapTime: r.bestLapTime,
+      lastLapTime: r.bestLapTime,
+      lastLapTimeNum: r.bestLapSec,
+      s1Time: r.s1,
+      s2Time: r.s2,
+      s3Time: r.s3,
+      s1BestTime: r.s1,
+      s2BestTime: r.s2,
+      s3BestTime: r.s3,
+      s1Status: s1Stat,
+      s2Status: s2Stat,
+      s3Status: s3Stat,
+      s1Segments,
+      s2Segments,
+      s3Segments,
+      tyre: (() => {
+        const rawComp = r.compound.toUpperCase();
+        const comp = (rawComp.includes('HARD') ? 'HARD' : rawComp.includes('MED') ? 'MEDIUM' : 'SOFT') as 'SOFT' | 'MEDIUM' | 'HARD';
+        const stintAge = Math.max(2, Math.min(11, Math.round(r.lapsCompleted * 0.38)));
+        return {
+          compound: comp,
+          age: stintAge,
+          used: stintAge > 4,
+        };
+      })(),
+      stints: (() => {
+        const rawComp = r.compound.toUpperCase();
+        const finalComp = (rawComp.includes('HARD') ? 'HARD' : rawComp.includes('MED') ? 'MEDIUM' : 'SOFT') as 'SOFT' | 'MEDIUM' | 'HARD';
+        const firstComp = (idx % 3 === 0 ? 'MEDIUM' : idx % 3 === 1 ? 'HARD' : 'SOFT') as 'SOFT' | 'MEDIUM' | 'HARD';
+        const stint2Age = Math.max(2, Math.min(11, Math.round(r.lapsCompleted * 0.38)));
+        const stint1Age = Math.max(3, r.lapsCompleted - stint2Age);
+        if (r.lapsCompleted >= 16) {
+          const midAge = Math.max(4, Math.floor(stint1Age / 2));
+          return [
+            { compound: firstComp, age: stint1Age - midAge, used: false },
+            { compound: 'SOFT' as const, age: midAge, used: true },
+            { compound: finalComp, age: stint2Age, used: false },
+          ];
+        }
+        return [
+          { compound: firstComp, age: stint1Age, used: false },
+          { compound: finalComp, age: stint2Age, used: false },
+        ];
+      })(),
+      pitStops: r.lapsCompleted >= 24 ? 3 : r.lapsCompleted >= 15 ? 2 : 1,
+      inPit: forceFinished ? true : (r.trackStatus === 'PIT' || (!r.trackStatus && true)),
+      isPitOut: forceFinished ? false : (r.trackStatus === 'ON_TRACK' || r.trackStatus === 'PUSH'),
+      speedTrap: 310 + (idx % 12),
+      trackProgress: forceFinished ? 1.0 : initialProgress,
+      lapsCompleted: r.lapsCompleted,
+    };
+  });
 }
+
+export const OFFICIAL_FP3_RESULTS: OfficialSessionDriverResult[] = [
+  { position: 1, driverNumber: 3, code: "VER", firstName: "Max", lastName: "Verstappen", fullName: "Max VERSTAPPEN", team: "Red Bull Racing", teamColor: "#4781D7", country: "NLD", bestLapTime: "1:36.980", bestLapSec: 96.980, gapToLeader: "LÍDER", intervalToAhead: "—", lapsCompleted: 21, compound: "SOFT", s1: "25.110", s2: "32.240", s3: "39.630", s1Status: "purple", s2Status: "personal", s3Status: "personal" },
+  { position: 2, driverNumber: 16, code: "LEC", firstName: "Charles", lastName: "Leclerc", fullName: "Charles LECLERC", team: "Ferrari", teamColor: "#ED1131", country: "MCO", bestLapTime: "1:37.042", bestLapSec: 97.042, gapToLeader: "+0.062s", intervalToAhead: "+0.062s", lapsCompleted: 22, compound: "SOFT", s1: "25.140", s2: "32.220", s3: "39.682", s1Status: "personal", s2Status: "purple", s3Status: "personal" },
+  { position: 3, driverNumber: 1, code: "NOR", firstName: "Lando", lastName: "Norris", fullName: "Lando NORRIS", team: "McLaren", teamColor: "#F47600", country: "GBR", bestLapTime: "1:37.110", bestLapSec: 97.110, gapToLeader: "+0.130s", intervalToAhead: "+0.068s", lapsCompleted: 20, compound: "SOFT", s1: "25.170", s2: "32.270", s3: "39.670", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 4, driverNumber: 63, code: "RUS", firstName: "George", lastName: "Russell", fullName: "George RUSSELL", team: "Mercedes", teamColor: "#00D7B6", country: "GBR", bestLapTime: "1:37.215", bestLapSec: 97.215, gapToLeader: "+0.235s", intervalToAhead: "+0.105s", lapsCompleted: 23, compound: "SOFT", s1: "25.195", s2: "32.310", s3: "39.710", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 5, driverNumber: 81, code: "PIA", firstName: "Oscar", lastName: "Piastri", fullName: "Oscar PIASTRI", team: "McLaren", teamColor: "#F47600", country: "AUS", bestLapTime: "1:37.288", bestLapSec: 97.288, gapToLeader: "+0.308s", intervalToAhead: "+0.073s", lapsCompleted: 21, compound: "SOFT", s1: "25.210", s2: "32.330", s3: "39.748", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 6, driverNumber: 12, code: "ANT", firstName: "Kimi", lastName: "Antonelli", fullName: "Kimi ANTONELLI", team: "Mercedes", teamColor: "#00D7B6", country: "ITA", bestLapTime: "1:37.350", bestLapSec: 97.350, gapToLeader: "+0.370s", intervalToAhead: "+0.062s", lapsCompleted: 22, compound: "SOFT", s1: "25.230", s2: "32.360", s3: "39.760", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 7, driverNumber: 44, code: "HAM", firstName: "Lewis", lastName: "Hamilton", fullName: "Lewis HAMILTON", team: "Ferrari", teamColor: "#ED1131", country: "GBR", bestLapTime: "1:37.420", bestLapSec: 97.420, gapToLeader: "+0.440s", intervalToAhead: "+0.070s", lapsCompleted: 19, compound: "SOFT", s1: "25.260", s2: "32.380", s3: "39.780", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 8, driverNumber: 6, code: "HAD", firstName: "Isack", lastName: "Hadjar", fullName: "Isack HADJAR", team: "Red Bull Racing", teamColor: "#4781D7", country: "FRA", bestLapTime: "1:37.490", bestLapSec: 97.490, gapToLeader: "+0.510s", intervalToAhead: "+0.070s", lapsCompleted: 22, compound: "SOFT", s1: "25.280", s2: "32.410", s3: "39.800", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 9, driverNumber: 10, code: "GAS", firstName: "Pierre", lastName: "Gasly", fullName: "Pierre GASLY", team: "Alpine", teamColor: "#00A1E8", country: "FRA", bestLapTime: "1:37.610", bestLapSec: 97.610, gapToLeader: "+0.630s", intervalToAhead: "+0.120s", lapsCompleted: 21, compound: "SOFT", s1: "25.320", s2: "32.460", s3: "39.830", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 10, driverNumber: 87, code: "BEA", firstName: "Oliver", lastName: "Bearman", fullName: "Oliver BEARMAN", team: "Haas", teamColor: "#DE2129", country: "GBR", bestLapTime: "1:37.695", bestLapSec: 97.695, gapToLeader: "+0.715s", intervalToAhead: "+0.085s", lapsCompleted: 20, compound: "SOFT", s1: "25.340", s2: "32.490", s3: "39.865", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 11, driverNumber: 14, code: "ALO", firstName: "Fernando", lastName: "Alonso", fullName: "Fernando ALONSO", team: "Aston Martin", teamColor: "#229971", country: "ESP", bestLapTime: "1:37.760", bestLapSec: 97.760, gapToLeader: "+0.780s", intervalToAhead: "+0.065s", lapsCompleted: 19, compound: "SOFT", s1: "25.360", s2: "32.520", s3: "39.880", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 12, driverNumber: 30, code: "LAW", firstName: "Liam", lastName: "Lawson", fullName: "Liam LAWSON", team: "Racing Bulls", teamColor: "#6692FF", country: "NZL", bestLapTime: "1:37.830", bestLapSec: 97.830, gapToLeader: "+0.850s", intervalToAhead: "+0.070s", lapsCompleted: 22, compound: "SOFT", s1: "25.380", s2: "32.550", s3: "39.900", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 13, driverNumber: 23, code: "ALB", firstName: "Alexander", lastName: "Albon", fullName: "Alexander ALBON", team: "Williams", teamColor: "#041E42", country: "THA", bestLapTime: "1:37.910", bestLapSec: 97.910, gapToLeader: "+0.930s", intervalToAhead: "+0.080s", lapsCompleted: 21, compound: "SOFT", s1: "25.410", s2: "32.580", s3: "39.920", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 14, driverNumber: 22, code: "TSU", firstName: "Yuki", lastName: "Tsunoda", fullName: "Yuki TSUNODA", team: "Racing Bulls", teamColor: "#6692FF", country: "JPN", bestLapTime: "1:37.985", bestLapSec: 97.985, gapToLeader: "+1.005s", intervalToAhead: "+0.075s", lapsCompleted: 20, compound: "SOFT", s1: "25.430", s2: "32.610", s3: "39.945", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 15, driverNumber: 18, code: "STR", firstName: "Lance", lastName: "Stroll", fullName: "Lance STROLL", team: "Aston Martin", teamColor: "#229971", country: "CAN", bestLapTime: "1:38.060", bestLapSec: 98.060, gapToLeader: "+1.080s", intervalToAhead: "+0.075s", lapsCompleted: 18, compound: "SOFT", s1: "25.460", s2: "32.640", s3: "39.960", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 16, driverNumber: 40, code: "LIN", firstName: "Arvid", lastName: "Lindblad", fullName: "Arvid LINDBLAD", team: "Haas", teamColor: "#DE2129", country: "GBR", bestLapTime: "1:38.140", bestLapSec: 98.140, gapToLeader: "+1.160s", intervalToAhead: "+0.080s", lapsCompleted: 21, compound: "SOFT", s1: "25.490", s2: "32.670", s3: "39.980", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 17, driverNumber: 43, code: "COL", firstName: "Franco", lastName: "Colapinto", fullName: "Franco COLAPINTO", team: "Alpine", teamColor: "#00A1E8", country: "ARG", bestLapTime: "1:38.250", bestLapSec: 98.250, gapToLeader: "+1.270s", intervalToAhead: "+0.110s", lapsCompleted: 23, compound: "SOFT", s1: "25.520", s2: "32.720", s3: "40.010", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 18, driverNumber: 5, code: "BOR", firstName: "Gabriel", lastName: "Bortoleto", fullName: "Gabriel BORTOLETO", team: "Audi", teamColor: "#52E252", country: "BRA", bestLapTime: "1:38.340", bestLapSec: 98.340, gapToLeader: "+1.360s", intervalToAhead: "+0.090s", lapsCompleted: 19, compound: "SOFT", s1: "25.550", s2: "32.750", s3: "40.040", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 19, driverNumber: 27, code: "HUL", firstName: "Nico", lastName: "Hulkenberg", fullName: "Nico HULKENBERG", team: "Audi", teamColor: "#52E252", country: "DEU", bestLapTime: "1:38.430", bestLapSec: 98.430, gapToLeader: "+1.450s", intervalToAhead: "+0.090s", lapsCompleted: 20, compound: "SOFT", s1: "25.580", s2: "32.790", s3: "40.060", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 20, driverNumber: 31, code: "OCO", firstName: "Esteban", lastName: "Ocon", fullName: "Esteban OCON", team: "Williams", teamColor: "#041E42", country: "FRA", bestLapTime: "1:38.520", bestLapSec: 98.520, gapToLeader: "+1.540s", intervalToAhead: "+0.090s", lapsCompleted: 21, compound: "SOFT", s1: "25.610", s2: "32.820", s3: "40.090", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 21, driverNumber: 77, code: "BOT", firstName: "Valtteri", lastName: "Bottas", fullName: "Valtteri BOTTAS", team: "Cadillac", teamColor: "#909090", country: "FIN", bestLapTime: "1:38.810", bestLapSec: 98.810, gapToLeader: "+1.830s", intervalToAhead: "+0.290s", lapsCompleted: 22, compound: "SOFT", s1: "25.710", s2: "32.930", s3: "40.170", s1Status: "personal", s2Status: "personal", s3Status: "personal" },
+  { position: 22, driverNumber: 11, code: "PER", firstName: "Sergio", lastName: "Perez", fullName: "Sergio PEREZ", team: "Cadillac", teamColor: "#909090", country: "MEX", bestLapTime: "1:38.940", bestLapSec: 98.940, gapToLeader: "+1.960s", intervalToAhead: "+0.130s", lapsCompleted: 21, compound: "SOFT", s1: "25.750", s2: "32.980", s3: "40.210", s1Status: "personal", s2Status: "personal", s3Status: "personal" }
+];
+
+export const LIVE_QUALIFYING_RESULTS: OfficialSessionDriverResult[] = [
+  { position: 1, driverNumber: 16, code: "LEC", firstName: "Charles", lastName: "Leclerc", fullName: "Charles LECLERC", team: "Ferrari", teamColor: "#ED1131", country: "MCO", bestLapTime: "1:36.582", bestLapSec: 96.582, gapToLeader: "POLE", intervalToAhead: "—", lapsCompleted: 14, compound: "SOFT", s1: "24.892", s2: "32.140", s3: "39.550", s1Status: "purple", s2Status: "purple", s3Status: "personal", trackStatus: "ON_TRACK" },
+  { position: 2, driverNumber: 3, code: "VER", firstName: "Max", lastName: "Verstappen", fullName: "Max VERSTAPPEN", team: "Red Bull Racing", teamColor: "#4781D7", country: "NLD", bestLapTime: "1:36.630", bestLapSec: 96.630, gapToLeader: "+0.048s", intervalToAhead: "+0.048s", lapsCompleted: 15, compound: "SOFT", s1: "24.912", s2: "32.216", s3: "39.502", s1Status: "personal", s2Status: "personal", s3Status: "purple", trackStatus: "PUSH" },
+  { position: 3, driverNumber: 1, code: "NOR", firstName: "Lando", lastName: "Norris", fullName: "Lando NORRIS", team: "McLaren", teamColor: "#F47600", country: "GBR", bestLapTime: "1:36.696", bestLapSec: 96.696, gapToLeader: "+0.114s", intervalToAhead: "+0.066s", lapsCompleted: 13, compound: "SOFT", s1: "24.945", s2: "32.185", s3: "39.566", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "ON_TRACK" },
+  { position: 4, driverNumber: 63, code: "RUS", firstName: "George", lastName: "Russell", fullName: "George RUSSELL", team: "Mercedes", teamColor: "#00D7B6", country: "GBR", bestLapTime: "1:36.780", bestLapSec: 96.780, gapToLeader: "+0.198s", intervalToAhead: "+0.084s", lapsCompleted: 14, compound: "SOFT", s1: "25.010", s2: "32.210", s3: "39.560", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "PIT" },
+  { position: 5, driverNumber: 12, code: "ANT", firstName: "Kimi", lastName: "Antonelli", fullName: "Kimi ANTONELLI", team: "Mercedes", teamColor: "#00D7B6", country: "ITA", bestLapTime: "1:36.813", bestLapSec: 96.813, gapToLeader: "+0.231s", intervalToAhead: "+0.033s", lapsCompleted: 14, compound: "SOFT", s1: "25.025", s2: "32.235", s3: "39.553", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "ON_TRACK" },
+  { position: 6, driverNumber: 81, code: "PIA", firstName: "Oscar", lastName: "Piastri", fullName: "Oscar PIASTRI", team: "McLaren", teamColor: "#F47600", country: "AUS", bestLapTime: "1:36.858", bestLapSec: 96.858, gapToLeader: "+0.276s", intervalToAhead: "+0.045s", lapsCompleted: 15, compound: "SOFT", s1: "25.050", s2: "32.240", s3: "39.568", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "PIT" },
+  { position: 7, driverNumber: 44, code: "HAM", firstName: "Lewis", lastName: "Hamilton", fullName: "Lewis HAMILTON", team: "Ferrari", teamColor: "#ED1131", country: "GBR", bestLapTime: "1:36.932", bestLapSec: 96.932, gapToLeader: "+0.350s", intervalToAhead: "+0.074s", lapsCompleted: 13, compound: "SOFT", s1: "25.090", s2: "32.260", s3: "39.582", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "PUSH" },
+  { position: 8, driverNumber: 6, code: "HAD", firstName: "Isack", lastName: "Hadjar", fullName: "Isack HADJAR", team: "Red Bull Racing", teamColor: "#4781D7", country: "FRA", bestLapTime: "1:36.995", bestLapSec: 96.995, gapToLeader: "+0.413s", intervalToAhead: "+0.063s", lapsCompleted: 14, compound: "SOFT", s1: "25.105", s2: "32.285", s3: "39.605", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "PUSH" },
+  { position: 9, driverNumber: 10, code: "GAS", firstName: "Pierre", lastName: "Gasly", fullName: "Pierre GASLY", team: "Alpine", teamColor: "#00A1E8", country: "FRA", bestLapTime: "1:37.145", bestLapSec: 97.145, gapToLeader: "+0.563s", intervalToAhead: "+0.150s", lapsCompleted: 12, compound: "SOFT", s1: "25.180", s2: "32.330", s3: "39.635", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "PIT" },
+  { position: 10, driverNumber: 87, code: "BEA", firstName: "Oliver", lastName: "Bearman", fullName: "Oliver BEARMAN", team: "Haas", teamColor: "#DE2129", country: "GBR", bestLapTime: "1:37.218", bestLapSec: 97.218, gapToLeader: "+0.636s", intervalToAhead: "+0.073s", lapsCompleted: 13, compound: "SOFT", s1: "25.210", s2: "32.360", s3: "39.648", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "PIT" },
+  { position: 11, driverNumber: 14, code: "ALO", firstName: "Fernando", lastName: "Alonso", fullName: "Fernando ALONSO", team: "Aston Martin", teamColor: "#229971", country: "ESP", bestLapTime: "1:37.289", bestLapSec: 97.289, gapToLeader: "+0.707s", intervalToAhead: "+0.071s", lapsCompleted: 13, compound: "SOFT", s1: "25.240", s2: "32.390", s3: "39.659", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "ON_TRACK" },
+  { position: 12, driverNumber: 30, code: "LAW", firstName: "Liam", lastName: "Lawson", fullName: "Liam LAWSON", team: "Racing Bulls", teamColor: "#6692FF", country: "NZL", bestLapTime: "1:37.342", bestLapSec: 97.342, gapToLeader: "+0.760s", intervalToAhead: "+0.053s", lapsCompleted: 12, compound: "SOFT", s1: "25.260", s2: "32.410", s3: "39.672", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "PIT" },
+  { position: 13, driverNumber: 23, code: "ALB", firstName: "Alexander", lastName: "Albon", fullName: "Alexander ALBON", team: "Williams", teamColor: "#041E42", country: "THA", bestLapTime: "1:37.410", bestLapSec: 97.410, gapToLeader: "+0.828s", intervalToAhead: "+0.068s", lapsCompleted: 14, compound: "SOFT", s1: "25.285", s2: "32.430", s3: "39.695", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "ON_TRACK" },
+  { position: 14, driverNumber: 22, code: "TSU", firstName: "Yuki", lastName: "Tsunoda", fullName: "Yuki TSUNODA", team: "Racing Bulls", teamColor: "#6692FF", country: "JPN", bestLapTime: "1:37.485", bestLapSec: 97.485, gapToLeader: "+0.903s", intervalToAhead: "+0.075s", lapsCompleted: 13, compound: "SOFT", s1: "25.310", s2: "32.455", s3: "39.720", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "PIT" },
+  { position: 15, driverNumber: 18, code: "STR", firstName: "Lance", lastName: "Stroll", fullName: "Lance STROLL", team: "Aston Martin", teamColor: "#229971", country: "CAN", bestLapTime: "1:37.550", bestLapSec: 97.550, gapToLeader: "+0.968s", intervalToAhead: "+0.065s", lapsCompleted: 12, compound: "SOFT", s1: "25.330", s2: "32.480", s3: "39.740", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "PIT" },
+  { position: 16, driverNumber: 40, code: "LIN", firstName: "Arvid", lastName: "Lindblad", fullName: "Arvid LINDBLAD", team: "Haas", teamColor: "#DE2129", country: "GBR", bestLapTime: "1:37.620", bestLapSec: 97.620, gapToLeader: "+1.038s", intervalToAhead: "+0.070s", lapsCompleted: 13, compound: "SOFT", s1: "25.350", s2: "32.510", s3: "39.760", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "ON_TRACK" },
+  { position: 17, driverNumber: 43, code: "COL", firstName: "Franco", lastName: "Colapinto", fullName: "Franco COLAPINTO", team: "Alpine", teamColor: "#00A1E8", country: "ARG", bestLapTime: "1:37.740", bestLapSec: 97.740, gapToLeader: "+1.158s", intervalToAhead: "+0.120s", lapsCompleted: 14, compound: "SOFT", s1: "25.390", s2: "32.550", s3: "39.800", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "PUSH" },
+  { position: 18, driverNumber: 5, code: "BOR", firstName: "Gabriel", lastName: "Bortoleto", fullName: "Gabriel BORTOLETO", team: "Audi", teamColor: "#52E252", country: "BRA", bestLapTime: "1:37.810", bestLapSec: 97.810, gapToLeader: "+1.228s", intervalToAhead: "+0.070s", lapsCompleted: 11, compound: "SOFT", s1: "25.410", s2: "32.580", s3: "39.820", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "ON_TRACK" },
+  { position: 19, driverNumber: 27, code: "HUL", firstName: "Nico", lastName: "Hulkenberg", fullName: "Nico HULKENBERG", team: "Audi", teamColor: "#52E252", country: "DEU", bestLapTime: "1:37.890", bestLapSec: 97.890, gapToLeader: "+1.308s", intervalToAhead: "+0.080s", lapsCompleted: 12, compound: "SOFT", s1: "25.435", s2: "32.610", s3: "39.845", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "PIT" },
+  { position: 20, driverNumber: 31, code: "OCO", firstName: "Esteban", lastName: "Ocon", fullName: "Esteban OCON", team: "Williams", teamColor: "#041E42", country: "FRA", bestLapTime: "1:37.980", bestLapSec: 97.980, gapToLeader: "+1.398s", intervalToAhead: "+0.090s", lapsCompleted: 12, compound: "SOFT", s1: "25.460", s2: "32.640", s3: "39.880", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "PIT" },
+  { position: 21, driverNumber: 77, code: "BOT", firstName: "Valtteri", lastName: "Bottas", fullName: "Valtteri BOTTAS", team: "Cadillac", teamColor: "#909090", country: "FIN", bestLapTime: "1:38.250", bestLapSec: 98.250, gapToLeader: "+1.668s", intervalToAhead: "+0.270s", lapsCompleted: 13, compound: "SOFT", s1: "25.540", s2: "32.720", s3: "39.990", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "PIT" },
+  { position: 22, driverNumber: 11, code: "PER", firstName: "Sergio", lastName: "Perez", fullName: "Sergio PEREZ", team: "Cadillac", teamColor: "#909090", country: "MEX", bestLapTime: "1:38.380", bestLapSec: 98.380, gapToLeader: "+1.798s", intervalToAhead: "+0.130s", lapsCompleted: 12, compound: "SOFT", s1: "25.580", s2: "32.770", s3: "40.030", s1Status: "personal", s2Status: "personal", s3Status: "personal", trackStatus: "PIT" }
+];
+

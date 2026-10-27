@@ -6,8 +6,16 @@ import { DriverSessionModal } from './DriverSessionModal';
 import { 
   OFFICIAL_FP1_RESULTS, 
   OFFICIAL_FP2_RESULTS, 
+  OFFICIAL_FP3_RESULTS,
   convertOfficialResultsToLeaderboardEntries 
 } from '../data/officialWeekendSessions';
+import { useLiveSession } from '../context/LiveSessionProvider';
+import { MiniSectorsTracker } from './MiniSectorsTracker';
+import {
+  scheduleSyncService,
+  getNextUpcomingGrandPrix,
+  getGrandPrixTimeline,
+} from '../services/scheduleSyncService';
 
 export type WeekendSessionKey = 'FP1' | 'FP2' | 'FP3' | 'QUALIFYING' | 'RACE';
 
@@ -15,53 +23,79 @@ export interface WeekendSessionMeta {
   key: WeekendSessionKey;
   label: string;
   badgeName: string;
-  status: 'completed' | 'live' | 'scheduled';
+  status: 'completed' | 'live' | 'next' | 'future' | 'scheduled';
   scheduledTime: string;
   sessionKey: number;
 }
 
-export const MALAYSIAN_GP_SESSIONS: WeekendSessionMeta[] = [
-  {
-    key: 'FP1',
-    label: 'FP1',
-    badgeName: 'LIBRES 1 (FP1)',
-    status: 'completed',
-    scheduledTime: 'Vie, 2 oct • 04:30 UTC (Finalizado)',
-    sessionKey: 11727,
-  },
-  {
-    key: 'FP2',
-    label: 'FP2',
-    badgeName: 'LIBRES 2 (FP2)',
-    status: 'completed',
-    scheduledTime: 'Vie, 2 oct • 08:00 UTC (Finalizado)',
-    sessionKey: 11728,
-  },
-  {
-    key: 'FP3',
-    label: 'FP3',
-    badgeName: 'LIBRES 3 (FP3)',
-    status: 'scheduled',
-    scheduledTime: 'Sáb, 3 oct • 04:30 UTC (06:30h ESP / 12:30h Local)',
-    sessionKey: 11729,
-  },
-  {
-    key: 'QUALIFYING',
-    label: 'Qualy',
-    badgeName: 'CLASIFICACIÓN',
-    status: 'scheduled',
-    scheduledTime: 'Sáb, 3 oct • 08:00 UTC (10:00h ESP / 16:00h Local)',
-    sessionKey: 11730,
-  },
-  {
-    key: 'RACE',
-    label: 'Carrera',
-    badgeName: 'CARRERA',
-    status: 'scheduled',
-    scheduledTime: 'Dom, 4 oct • 07:00 UTC (09:00h ESP / 15:00h Local)',
-    sessionKey: 11731,
-  },
-];
+export function buildWeekendSessionTabs(): WeekendSessionMeta[] {
+  const schedule = scheduleSyncService.getState().schedule;
+  const gp = getNextUpcomingGrandPrix(schedule);
+  const timeline = getGrandPrixTimeline(gp);
+
+  const findSessionItem = (types: string[]) =>
+    timeline.sessions.find(s => types.includes(s.session.type));
+
+  const fp1 = findSessionItem(['FP1']);
+  const fp2 = findSessionItem(['FP2', 'Sprint Qualifying']);
+  const fp3 = findSessionItem(['FP3', 'Sprint']);
+  const qualy = findSessionItem(['Qualifying']);
+  const race = findSessionItem(['Race']);
+
+  const formatSched = (item: typeof fp1, fallback: string) => {
+    if (!item) return fallback;
+    const statusSuffix =
+      item.status === 'live'
+        ? ' (🔴 EN DIRECTO)'
+        : item.status === 'completed'
+        ? ' (Finalizado)'
+        : '';
+    return `${item.formattedDate} • ${item.formattedTime}h${statusSuffix}`;
+  };
+
+  return [
+    {
+      key: 'FP1',
+      label: 'FP1',
+      badgeName: fp1?.session.name.toUpperCase() || 'LIBRES 1 (FP1)',
+      status: fp1?.status || 'completed',
+      scheduledTime: formatSched(fp1, 'Viernes • Libres 1 (FP1)'),
+      sessionKey: 11727,
+    },
+    {
+      key: 'FP2',
+      label: fp2?.session.type === 'Sprint Qualifying' ? 'SQ' : 'FP2',
+      badgeName: fp2?.session.name.toUpperCase() || 'LIBRES 2 (FP2)',
+      status: fp2?.status || 'completed',
+      scheduledTime: formatSched(fp2, 'Viernes • Libres 2 (FP2)'),
+      sessionKey: 11728,
+    },
+    {
+      key: 'FP3',
+      label: fp3?.session.type === 'Sprint' ? 'Sprint' : 'FP3',
+      badgeName: fp3?.session.name.toUpperCase() || 'LIBRES 3 (FP3)',
+      status: fp3?.status || 'completed',
+      scheduledTime: formatSched(fp3, 'Sábado • Libres 3 (FP3)'),
+      sessionKey: 11729,
+    },
+    {
+      key: 'QUALIFYING',
+      label: 'Qualy',
+      badgeName: qualy?.session.name.toUpperCase() || 'CLASIFICACIÓN',
+      status: qualy?.status || 'completed',
+      scheduledTime: formatSched(qualy, 'Sábado • Clasificación'),
+      sessionKey: 11730,
+    },
+    {
+      key: 'RACE',
+      label: 'Carrera',
+      badgeName: race?.session.name.toUpperCase() || 'CARRERA',
+      status: race?.status || 'scheduled',
+      scheduledTime: formatSched(race, 'Domingo • Carrera'),
+      sessionKey: 11731,
+    },
+  ];
+}
 
 function createScheduledLeaderboardEntries(template: typeof OFFICIAL_FP2_RESULTS): LeaderboardEntry[] {
   return template.map((r, idx) => ({
@@ -121,154 +155,6 @@ const parseLapTimeToSec = (t?: string): number => {
   }
   return parseFloat(clean) || Infinity;
 };
-
-// Mini Sector Group (8 mini-bars for S1, 8 for S2, 9 for S3 = 25 total)
-function MiniSectorGroup({
-  lastTime,
-  bestTime,
-  status,
-  bestStatus,
-  segments,
-  count,
-}: {
-  lastTime?: string;
-  bestTime?: string;
-  status: string;
-  bestStatus?: string;
-  segments?: Array<string>;
-  count: number;
-}) {
-  const colorMap: Record<string, string> = {
-    purple: '#d354ff',
-    green: '#00e676',
-    yellow: '#ffd60a',
-    pit: '#0095ff',
-    none: 'rgba(255, 255, 255, 0.12)',
-  };
-
-  // Each sector always renders all 8 (or 9) microsectors exactly like formula1dashboard!
-  const totalTicks = count || 8;
-
-  const ticks: string[] = [];
-  const hasCompletedTime = Boolean(lastTime && lastTime.trim() !== '' && !lastTime.includes('-'));
-  const allSegsActive = Boolean(segments && segments.length > 0 && segments.every(s => s && s !== 'none'));
-
-  for (let i = 0; i < totalTicks; i++) {
-    if (segments && segments.length > 0) {
-      if (i < segments.length) {
-        const segVal = segments[i];
-        ticks.push((segVal && colorMap[segVal]) ? colorMap[segVal] : colorMap.none);
-      } else if (hasCompletedTime && allSegsActive) {
-        // Only stretch if the entire sector has finished with legacy short segment array
-        const mappedIdx = Math.floor((i / totalTicks) * segments.length);
-        const segVal = segments[mappedIdx];
-        ticks.push((segVal && colorMap[segVal]) ? colorMap[segVal] : colorMap.none);
-      } else {
-        ticks.push(colorMap.none);
-      }
-    } else if (hasCompletedTime && status && status !== 'none') {
-      ticks.push(colorMap[status] || colorMap.none);
-    } else {
-      ticks.push(colorMap.none);
-    }
-  }
-
-  const lastColor =
-    status === 'purple'
-      ? '#d354ff'
-      : status === 'green'
-      ? '#00e676'
-      : status === 'yellow'
-      ? '#ffd60a'
-      : status === 'pit'
-      ? '#0095ff'
-      : '#94a3b8';
-
-  const bestColor =
-    bestStatus === 'purple'
-      ? '#d354ff'
-      : bestStatus === 'green'
-      ? '#00e676'
-      : '#f8fafc';
-
-  return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      gap: '2px',
-      flex: 1,
-      minWidth: 0,
-    }}>
-      {/* Row of micro-bars (larger, vivid, clearly visible) */}
-      <div style={{ display: 'flex', gap: '2px', width: '100%', justifyContent: 'center' }}>
-        {ticks.map((c, i) => (
-          <div
-            key={i}
-            style={{
-              flex: 1,
-              maxWidth: '12px',
-              minWidth: '4px',
-              height: '8px',
-              borderRadius: '2px',
-              backgroundColor: c,
-              boxShadow: c === '#d354ff' 
-                ? '0 0 6px rgba(211, 84, 255, 0.85)' 
-                : c === '#00e676'
-                ? '0 0 5px rgba(0, 230, 118, 0.65)'
-                : 'none',
-              transition: 'background-color 0.2s ease',
-            }}
-          />
-        ))}
-      </div>
-
-      {/* Sector times: Último & Mejor uno al lado del otro */}
-      <div style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: '6px',
-        marginTop: '2px',
-        whiteSpace: 'nowrap',
-      }}>
-        {/* Last sector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-          <span style={{ fontSize: '0.55rem', fontFamily: 'var(--font-mono)', color: '#64748b', fontWeight: 800 }}>
-            LAST
-          </span>
-          <span style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: '0.78rem',
-            fontWeight: 700,
-            color: lastColor,
-            letterSpacing: '0.01em',
-          }}>
-            {lastTime && lastTime.trim() !== '' ? lastTime : '—'}
-          </span>
-        </div>
-
-        <span style={{ color: 'rgba(255, 255, 255, 0.25)', fontSize: '0.70rem' }}>·</span>
-
-        {/* Best sector */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
-          <span style={{ fontSize: '0.55rem', fontFamily: 'var(--font-mono)', color: '#c084fc', fontWeight: 800 }}>
-            BEST
-          </span>
-          <span style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: '0.78rem',
-            fontWeight: 800,
-            color: bestColor,
-            letterSpacing: '0.01em',
-          }}>
-            {bestTime && bestTime.trim() !== '' ? bestTime : (lastTime || '—')}
-          </span>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function getContrastTextColor(hexColor?: string): string {
   if (!hexColor) return '#ffffff';
@@ -369,7 +255,7 @@ interface LeaderboardProps {
 }
 
 export const Leaderboard: React.FC<LeaderboardProps> = ({
-  entries: rawEntries,
+  entries: propEntries,
   selectedDriverId,
   onSelectDriver,
   isQualifying = false,
@@ -390,30 +276,52 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
     position?: number;
   } | null>(null);
 
-  // Active Session Switcher Tab (Defaults to FP2 - latest completed session)
-  const [selectedSessionTab, setSelectedSessionTab] = useState<WeekendSessionKey>(() => {
-    const lower = (sessionName || '').toLowerCase();
-    if (trackStatus !== 'CHEQUERED' && trackStatus !== 'FINISHED') {
-      if (lower.includes('fp3')) return 'FP3';
-      if (lower.includes('qual') || sessionType === 'QUALIFYING') return 'QUALIFYING';
-      if (sessionType === 'RACE') return 'RACE';
-    }
-    return 'FP2';
-  });
+  // Global Single Source of Truth (SSOT) from LiveSessionProvider
+  const {
+    activeSession,
+    leaderboard: ssotLeaderboard,
+    latencyMs,
+    isPulseActive,
+  } = useLiveSession();
+
+  const resolveTabFromSession = useCallback((name?: string, type?: string): WeekendSessionKey => {
+    const lower = (name || '').toLowerCase();
+    if (lower.includes('fp1') || lower.includes('libres 1')) return 'FP1';
+    if (lower.includes('fp2') || lower.includes('libres 2')) return 'FP2';
+    if (lower.includes('fp3') || lower.includes('libres 3')) return 'FP3';
+    if (type === 'RACE' || lower.includes('carrera') || lower.includes('race')) return 'RACE';
+    return 'QUALIFYING';
+  }, []);
+
+  const activePropTab = useMemo(
+    () => resolveTabFromSession(sessionName, sessionType),
+    [sessionName, sessionType, resolveTabFromSession]
+  );
+
+  // Active Session Switcher Tab (syncs with parent session selector too)
+  const [selectedSessionTab, setSelectedSessionTab] = useState<WeekendSessionKey>(() =>
+    resolveTabFromSession(sessionName, sessionType)
+  );
+
+  React.useEffect(() => {
+    setSelectedSessionTab(activePropTab);
+  }, [activePropTab]);
 
   const activeRawEntries = useMemo(() => {
-    // 1. If currently viewed tab is live on track:
-    const isLiveSession = trackStatus !== 'CHEQUERED' && trackStatus !== 'FINISHED' && (
-      (selectedSessionTab === 'FP3' && (sessionName || '').toLowerCase().includes('fp3')) ||
-      (selectedSessionTab === 'QUALIFYING' && (sessionType === 'QUALIFYING' || (sessionName || '').toLowerCase().includes('qual'))) ||
-      (selectedSessionTab === 'RACE' && (sessionType === 'RACE' || (sessionName || '').toLowerCase().includes('carrera')))
-    );
-
-    if (isLiveSession && rawEntries && rawEntries.length > 0) {
-      return rawEntries;
+    // 1. If viewing the currently active session tab passed from App.tsx, use live propEntries
+    if (selectedSessionTab === activePropTab && propEntries && propEntries.length > 0) {
+      return propEntries;
     }
 
-    // 2. Official frozen results from OpenF1 for completed sessions
+    // 2. Live Qualifying tab fallback
+    if (selectedSessionTab === 'QUALIFYING') {
+      return propEntries && propEntries.length > 0 ? propEntries : ssotLeaderboard;
+    }
+
+    // 3. Completed practice sessions
+    if (selectedSessionTab === 'FP3') {
+      return convertOfficialResultsToLeaderboardEntries(OFFICIAL_FP3_RESULTS);
+    }
     if (selectedSessionTab === 'FP1') {
       return convertOfficialResultsToLeaderboardEntries(OFFICIAL_FP1_RESULTS);
     }
@@ -421,59 +329,45 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
       return convertOfficialResultsToLeaderboardEntries(OFFICIAL_FP2_RESULTS);
     }
 
-    // 3. Clean zeroed grid for scheduled upcoming sessions (FP3, Qualy, Carrera)
+    // 4. Race tab: if propEntries has race data, use it; otherwise scheduled grid
+    if (propEntries && propEntries.length > 0 && activePropTab === 'RACE') {
+      return propEntries;
+    }
     return createScheduledLeaderboardEntries(OFFICIAL_FP2_RESULTS);
-  }, [selectedSessionTab, rawEntries, sessionName, sessionType, trackStatus]);
+  }, [selectedSessionTab, activePropTab, propEntries, ssotLeaderboard]);
 
   const entries = useMemo(() => {
     if (!Array.isArray(activeRawEntries)) return [];
-    const hasHadjar = activeRawEntries.some(e => e?.driver && (e.driver.code === 'HAD' || e.driver.number === 6));
+    // Ensure all 22 official drivers in the grid are preserved without filtering anyone out
     const result: LeaderboardEntry[] = [];
     for (const e of activeRawEntries) {
       if (!e || !e.driver) continue;
-      const isTsu =
-        e.driver.code === 'TSU' ||
-        e.driver.id === 'tsu' ||
-        e.driver.number === 22 ||
-        (e.driver.lastName && e.driver.lastName.toLowerCase().includes('tsunoda'));
-      if (isTsu) {
-        if (!hasHadjar) {
-          result.push({
-            ...e,
-            driver: {
-              id: 'had',
-              code: 'HAD',
-              number: 6,
-              firstName: 'Isack',
-              lastName: 'Hadjar',
-              team: 'Red Bull Racing',
-              teamColor: '#3671C6',
-              country: 'Francia',
-              flag: '🇫🇷',
-            },
-          });
-        }
-        continue;
-      }
       result.push(e);
     }
     const sorted = [...result].sort((a, b) => {
-      // 1. If positions are valid and distinct, order by real position
+      // 1. In timed sessions (practice/qualy), sort by best lap time (fastest first)
+      const timeA = parseLapTimeToSec(a.bestLapTime || a.lastLapTime);
+      const timeB = parseLapTimeToSec(b.bestLapTime || b.lastLapTime);
+      const hasTimeA = timeA !== Infinity && timeA > 0;
+      const hasTimeB = timeB !== Infinity && timeB > 0;
+
+      // Drivers WITH a completed lap always come ahead of drivers WITHOUT a time
+      if (hasTimeA && !hasTimeB) return -1;
+      if (!hasTimeA && hasTimeB) return 1;
+      if (hasTimeA && hasTimeB) {
+        if (timeA !== timeB) return timeA - timeB;
+      }
+
+      // If positions are valid and distinct, order by real position
       if (a.position && b.position && a.position !== b.position) {
         return a.position - b.position;
       }
-      // 2. In timed sessions (practice/qualy) without distinct position, order by best lap
-      const timeA = parseLapTimeToSec(a.bestLapTime || a.lastLapTime);
-      const timeB = parseLapTimeToSec(b.bestLapTime || b.lastLapTime);
-      if (timeA !== Infinity || timeB !== Infinity) {
-        return timeA - timeB;
-      }
-      return (a.position || 99) - (b.position || 99);
+      return (a.position || a.driver.number || 99) - (b.position || b.driver.number || 99);
     });
 
     return sorted.map((e, idx) => ({
       ...e,
-      position: e.position || (idx + 1),
+      position: idx + 1,
     }));
   }, [activeRawEntries]);
 
@@ -573,19 +467,14 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
 
     const now = Date.now();
     const newOvertakes = new Map<string, { dir: 'up' | 'down'; diff: number; timestamp: number }>();
-
-    for (const [id, data] of overtakes.entries()) {
-      if (now - data.timestamp < 3800) {
-        newOvertakes.set(id, data);
-      }
-    }
-
+    let hasPositionChange = false;
     let detectedToast: { gained: string; lost: string; pos: number } | null = null;
 
     if (prevPositionsRef.current.size > 0) {
       entries.forEach((entry) => {
         const oldPos = prevPositionsRef.current.get(entry.driver.id);
         if (oldPos !== undefined && oldPos !== entry.position) {
+          hasPositionChange = true;
           if (entry.position < oldPos) {
             newOvertakes.set(entry.driver.id, {
               dir: 'up',
@@ -615,8 +504,9 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
     entries.forEach(e => currentMap.set(e.driver.id, e.position));
     prevPositionsRef.current = currentMap;
 
-    if (newOvertakes.size > 0) {
-      setOvertakes(new Map(newOvertakes));
+    // Only update overtakes state if a position genuinely changed (breaks infinite loop!)
+    if (hasPositionChange) {
+      setOvertakes(newOvertakes);
     }
     if (detectedToast) {
       setOvertakeToast(detectedToast);
@@ -651,24 +541,36 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
   // Determine whether this session is timed (Practice / Qualifying) vs Lap-based (Race / Sprint)
   const isTimedSession = sessionType === 'PRACTICE' || sessionType === 'QUALIFYING' || totalLaps === 0 || (sessionName && /fp|practice|libres|qual/i.test(sessionName));
 
-  const currentSessionMeta = MALAYSIAN_GP_SESSIONS.find(s => s.key === selectedSessionTab) || MALAYSIAN_GP_SESSIONS[1];
-  const isScheduledSession = selectedSessionTab === 'FP3' || selectedSessionTab === 'QUALIFYING' || selectedSessionTab === 'RACE';
+  const weekendSessions = useMemo(() => buildWeekendSessionTabs(), [sessionName, trackStatus]);
+  const upcomingGp = useMemo(() => getNextUpcomingGrandPrix(scheduleSyncService.getState().schedule), [sessionName]);
+  const gpTimeline = useMemo(() => getGrandPrixTimeline(upcomingGp), [upcomingGp, sessionName, trackStatus]);
+  const isAnySessionLiveNow = Boolean(gpTimeline.activeSession) || activeSession.status === 'LIVE';
+
+  const currentSessionMeta = weekendSessions.find(s => s.key === selectedSessionTab) || weekendSessions[3];
+  const isScheduledSession = selectedSessionTab === 'RACE' && activePropTab !== 'RACE';
   const effectiveSessionKey = currentSessionMeta.sessionKey;
 
-  const formattedSessionBadge = currentSessionMeta.badgeName;
+  const isQualyFinished = !isAnySessionLiveNow || trackStatus === 'CHEQUERED' || (localRemainingSec <= 0 && activeSession.status === 'FINISHED');
+  const isCurrentTabFinished =
+    !isAnySessionLiveNow ||
+    (selectedSessionTab !== activePropTab && (selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2' || selectedSessionTab === 'FP3')) ||
+    (selectedSessionTab === activePropTab && trackStatus === 'CHEQUERED');
+
+  const formattedSessionBadge = selectedSessionTab === activePropTab
+    ? (isCurrentTabFinished ? `🏁 RESULTADOS CONSOLIDADOS - ${currentSessionMeta.badgeName}` : `🔴 EN DIRECTO - ${(sessionName || currentSessionMeta.badgeName).toUpperCase()}`)
+    : `🏁 ${currentSessionMeta.badgeName}`;
 
   const formattedRemainingTime = (() => {
-    if (isScheduledSession) return '00:00';
-    if (selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2') return '00:00';
-    const sec = Math.max(0, localRemainingSec);
+    if (isScheduledSession || isCurrentTabFinished) return '00:00';
+    const sec = Math.max(0, localRemainingSec > 0 ? localRemainingSec : activeSession.remainingSec);
     const mins = Math.floor(sec / 60);
     const remSecs = Math.floor(sec % 60);
     return `${String(mins).padStart(2, '0')}:${String(remSecs).padStart(2, '0')}`;
   })();
 
   // Real on-track vs in-pit counts without artificial overrides
-  const effectiveInPitCount = entries.filter(e => e.inPit).length;
-  const effectiveOnTrackCount = Math.max(0, entries.length - effectiveInPitCount);
+  const effectiveInPitCount = isCurrentTabFinished ? entries.length : entries.filter(e => e.inPit).length;
+  const effectiveOnTrackCount = isCurrentTabFinished ? 0 : Math.max(0, entries.length - effectiveInPitCount);
 
   // Qualifying cutoff calculations
   const isQualy = isQualifying || sessionType === 'QUALIFYING' || /qual|clasif/i.test(sessionName || '') || selectedSessionTab === 'QUALIFYING';
@@ -676,9 +578,6 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
   // In 2026 regulations with 22 cars (11 teams, e.g. Cadillac):
   // Q1 eliminates 6 cars (P17-P22, top 16 advance) -> cutoff divider before index 16 (P17)
   // Q2 eliminates 6 cars (P11-P16, top 10 advance) -> cutoff divider before index 10 (P11)
-  // With 20 cars:
-  // Q1 eliminates 5 cars (P16-P20, top 15 advance) -> cutoff divider before index 15 (P16)
-  // Q2 eliminates 5 cars (P11-P15, top 10 advance) -> cutoff divider before index 10 (P11)
   const q1CutoffIndex = totalCars >= 22 ? 16 : 15;
   const q2CutoffIndex = 10;
 
@@ -690,7 +589,9 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
   const knockedOutCount = entries.filter(e => e.isKnockedOut).length;
 
   let qualyPhase: 'Q1' | 'Q2' | 'Q3' = 'Q1';
-  if (isExplicitQ3 || knockedOutCount >= 10) {
+  if (selectedSessionTab === 'QUALIFYING') {
+    qualyPhase = activeSession.qualyPhase;
+  } else if (isExplicitQ3 || knockedOutCount >= 10) {
     qualyPhase = 'Q3';
   } else if (isExplicitQ2 || (knockedOutCount >= 5 && knockedOutCount < 10)) {
     qualyPhase = 'Q2';
@@ -709,18 +610,18 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
             Tabla de Tiempos
           </span>
 
-          {/* Session Type Badge (e.g. LIBRES 2 (FP2)) */}
+          {/* Session Type Badge */}
           <div style={{
             display: 'inline-flex',
             alignItems: 'center',
             gap: '5px',
-            background: 'rgba(225, 6, 0, 0.18)',
-            border: '1px solid rgba(225, 6, 0, 0.45)',
+            background: isCurrentTabFinished ? 'rgba(255, 255, 255, 0.12)' : 'rgba(225, 6, 0, 0.18)',
+            border: `1px solid ${isCurrentTabFinished ? 'rgba(255, 255, 255, 0.3)' : 'rgba(225, 6, 0, 0.45)'}`,
             padding: '2px 8px',
             borderRadius: '6px',
             marginLeft: '4px',
           }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ff4d4d', boxShadow: '0 0 6px #ff4d4d' }} />
+            {!isCurrentTabFinished && <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ff4d4d', boxShadow: '0 0 6px #ff4d4d' }} />}
             <span style={{ fontSize: '0.66rem', fontWeight: 900, color: '#ffffff', letterSpacing: '0.04em', fontFamily: 'var(--font-display)' }}>
               {formattedSessionBadge}
             </span>
@@ -742,8 +643,8 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
               <span style={{ fontSize: '0.62rem', fontWeight: 800, color: '#60a5fa', letterSpacing: '0.5px' }}>
                 📅 PROGRAMADA
               </span>
-              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: '0.78rem', color: '#ffffff' }}>
-                {selectedSessionTab === 'FP3' ? 'SÁB 04:30 UTC' : selectedSessionTab === 'QUALIFYING' ? 'SÁB 08:00 UTC' : 'DOM 07:00 UTC'}
+              <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 800, fontSize: '0.74rem', color: '#ffffff' }}>
+                {currentSessionMeta.scheduledTime}
               </span>
             </div>
           ) : isTimedSession ? (
@@ -751,12 +652,12 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
               display: 'inline-flex',
               alignItems: 'center',
               gap: '6px',
-              background: (selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2' || localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
+              background: (isCurrentTabFinished || localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
                 ? 'rgba(255, 255, 255, 0.1)'
                 : trackStatus === 'RED'
                 ? 'rgba(239, 68, 68, 0.18)'
                 : 'rgba(0, 215, 182, 0.14)',
-              border: (selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2' || localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
+              border: (isCurrentTabFinished || localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
                 ? '1px solid rgba(255, 255, 255, 0.28)'
                 : trackStatus === 'RED'
                 ? '1px solid rgba(239, 68, 68, 0.45)'
@@ -769,21 +670,21 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
               <span style={{
                 fontSize: '0.62rem',
                 fontWeight: 800,
-                color: (selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2' || localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
+                color: (isCurrentTabFinished || localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
                   ? '#e2e8f0'
                   : trackStatus === 'RED'
                   ? '#ff4d4d'
                   : '#00D7B6',
                 letterSpacing: '0.5px',
               }}>
-                {(selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2' || localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
+                {(isCurrentTabFinished || localRemainingSec <= 0 || trackStatus === 'CHEQUERED')
                   ? '🏁 FINALIZADA'
                   : trackStatus === 'RED'
                   ? '⏸ DETENIDA'
                   : '⏱ RESTANTE'}
               </span>
               <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 900, fontSize: '0.88rem', color: '#ffffff', letterSpacing: '0.03em' }}>
-                {formattedRemainingTime}
+                {isCurrentTabFinished ? '00:00' : formattedRemainingTime}
               </span>
               <span style={{ fontSize: '0.64rem', color: 'rgba(255, 255, 255, 0.45)', fontWeight: 700, fontFamily: 'var(--font-mono)' }}>
                 / 60:00
@@ -840,12 +741,12 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
               fontSize: '0.64rem',
               fontWeight: 700,
             }}>
-              <span style={{ color: (selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2') ? '#94a3b8' : '#00e676' }}>
-                {(selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2') ? '● 0 PISTA' : `● ${effectiveOnTrackCount} PISTA`}
+              <span style={{ color: isCurrentTabFinished ? '#94a3b8' : '#00e676' }}>
+                {isCurrentTabFinished ? '● 0 PISTA' : `● ${effectiveOnTrackCount} PISTA`}
               </span>
               <span style={{ color: 'rgba(255,255,255,0.2)' }}>|</span>
               <span style={{ color: '#60a5fa' }}>
-                {(selectedSessionTab === 'FP1' || selectedSessionTab === 'FP2') ? '22 BOX' : `${effectiveInPitCount} BOX`}
+                {isCurrentTabFinished ? '22 BOX / PARC FERMÉ' : `${effectiveInPitCount} BOX`}
               </span>
             </div>
           )}
@@ -896,8 +797,11 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <div className="session-switcher-bar">
             <span className="session-switcher-label">SESIÓN:</span>
-            {MALAYSIAN_GP_SESSIONS.map((sess) => {
+            {weekendSessions.map((sess) => {
               const isSelected = selectedSessionTab === sess.key;
+              const isCompleted = sess.status === 'completed' || (sess.key !== 'RACE' && !isAnySessionLiveNow);
+              const isLive = sess.status === 'live';
+
               return (
                 <button
                   key={sess.key}
@@ -905,8 +809,8 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                   onClick={() => setSelectedSessionTab(sess.key)}
                   title={sess.scheduledTime}
                 >
-                  {sess.status === 'completed' && <span className="tab-check">✓</span>}
-                  {sess.status === 'live' && <span className="tab-live-dot" />}
+                  {isCompleted && <span className="tab-check">✓</span>}
+                  {isLive && <span className="tab-live-dot" />}
                   <span>{sess.label}</span>
                 </button>
               );
@@ -939,20 +843,147 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
         </div>
       )}
 
-      {/* Table Header: POS | DRIVER | GAP | INT | LAST | BEST | MINI-SECTORS | LAPS | PIT | TYRE */}
+      {/* Qualifying Header Ribbon */}
+      {selectedSessionTab === 'QUALIFYING' && (
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          padding: '7px 14px',
+          background: isQualyFinished
+            ? 'linear-gradient(90deg, rgba(255, 255, 255, 0.08) 0%, rgba(211, 84, 255, 0.10) 50%, rgba(0, 215, 182, 0.08) 100%)'
+            : 'linear-gradient(90deg, rgba(225, 6, 0, 0.14) 0%, rgba(211, 84, 255, 0.12) 50%, rgba(0, 215, 182, 0.12) 100%)',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.12)',
+          flexWrap: 'wrap',
+          gap: '8px',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: isQualyFinished ? 'rgba(255, 255, 255, 0.12)' : 'rgba(239, 68, 68, 0.25)',
+              border: `1px solid ${isQualyFinished ? 'rgba(255, 255, 255, 0.3)' : 'rgba(239, 68, 68, 0.55)'}`,
+              padding: '2px 8px',
+              borderRadius: '6px',
+              fontSize: '0.66rem',
+              fontWeight: 900,
+              color: isQualyFinished ? '#ffffff' : '#ff4d4d',
+              fontFamily: 'var(--font-display)',
+              letterSpacing: '0.04em',
+            }}>
+              {!isQualyFinished && <span className="tab-live-dot" style={{ width: '6px', height: '6px', background: '#ff4d4d' }} />}
+              {isQualyFinished ? '🏁 SESIÓN FINALIZADA - RESULTADOS OFICIALES' : `🔴 ${qualyPhase} EN DIRECTO`}
+            </span>
+
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(255, 255, 255, 0.06)',
+              border: '1px solid rgba(255, 255, 255, 0.12)',
+              padding: '2px 8px',
+              borderRadius: '6px',
+              fontSize: '0.64rem',
+              fontFamily: 'var(--font-mono)',
+              fontWeight: 700,
+              color: '#cbd5e1',
+            }}>
+              <span>📍 {activeSession.circuitName.split(' ')[0]}: {activeSession.circuitLocalTime}</span>
+              <span style={{ color: 'rgba(255,255,255,0.25)' }}>•</span>
+              <span>{activeSession.utcTime}</span>
+            </div>
+
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '5px',
+              background: isQualyFinished ? 'rgba(255, 255, 255, 0.1)' : activeSession.trackStatus === 'GREEN' ? 'rgba(0, 230, 118, 0.15)' : 'rgba(255, 214, 10, 0.15)',
+              border: `1px solid ${isQualyFinished ? 'rgba(255, 255, 255, 0.25)' : activeSession.trackStatus === 'GREEN' ? 'rgba(0, 230, 118, 0.4)' : 'rgba(255, 214, 10, 0.4)'}`,
+              padding: '2px 8px',
+              borderRadius: '6px',
+              fontSize: '0.62rem',
+              fontWeight: 800,
+              color: isQualyFinished ? '#f1f5f9' : activeSession.trackStatus === 'GREEN' ? '#00e676' : '#ffd60a',
+              letterSpacing: '0.03em',
+            }}>
+              {isQualyFinished ? '🏁 BANDERA A CUADROS (PARC FERMÉ)' : `● ${activeSession.trackStatus === 'GREEN' ? 'BANDERA VERDE' : 'BANDERA AMARILLA'}`}
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            {/* Live Network Stream & Latency Indicator */}
+            <div
+              className="network-stream-pulse-pill"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                background: isQualyFinished ? 'rgba(255, 255, 255, 0.08)' : (isPulseActive ? 'rgba(0, 230, 118, 0.24)' : 'rgba(0, 230, 118, 0.12)'),
+                border: `1px solid ${isQualyFinished ? 'rgba(255, 255, 255, 0.2)' : (isPulseActive ? 'rgba(0, 230, 118, 0.75)' : 'rgba(0, 230, 118, 0.35)')}`,
+                padding: '2px 10px',
+                borderRadius: '6px',
+                fontSize: '0.66rem',
+                fontFamily: 'var(--font-mono)',
+                fontWeight: 800,
+                color: isQualyFinished ? '#cbd5e1' : '#00e676',
+                boxShadow: !isQualyFinished && isPulseActive ? '0 0 12px rgba(0, 230, 118, 0.45)' : 'none',
+                transition: 'all 0.2s cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
+              title={isQualyFinished ? "Sesión oficial concluida — Datos consolidados FIA" : "Stream de telemetría oficial F1 en vivo conectado vía SignalR Core"}
+            >
+              <span
+                style={{
+                  width: '7px',
+                  height: '7px',
+                  borderRadius: '50%',
+                  background: isQualyFinished ? '#94a3b8' : '#00e676',
+                  boxShadow: isQualyFinished ? 'none' : (isPulseActive ? '0 0 10px #00e676, 0 0 16px #00e676' : '0 0 4px #00e676'),
+                  transform: !isQualyFinished && isPulseActive ? 'scale(1.35)' : 'scale(1)',
+                  transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+                  display: 'inline-block',
+                }}
+              />
+              <span style={{ letterSpacing: '0.04em' }}>
+                {isQualyFinished ? 'OFICIAL FIA — CONSOLIDADO' : `STREAM EN VIVO — ${latencyMs} ms`}
+              </span>
+            </div>
+
+            <div style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'rgba(211, 84, 255, 0.16)',
+              border: '1px solid rgba(211, 84, 255, 0.45)',
+              padding: '2px 10px',
+              borderRadius: '6px',
+              fontSize: '0.68rem',
+            }}>
+              <span style={{ color: '#d354ff', fontWeight: 900, fontFamily: 'var(--font-display)' }}>
+                {isQualyFinished ? '🏆 POLE POSITION OFICIAL:' : 'POLE PROVISIONAL:'}
+              </span>
+              <span style={{ color: '#ffffff', fontWeight: 800, fontFamily: 'var(--font-mono)' }}>{activeSession.provisionalPoleDriver}</span>
+              <span style={{ color: '#d354ff', fontWeight: 900, fontFamily: 'var(--font-mono)' }}>{activeSession.provisionalPoleTime}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Table Header: POS | PILOTO | GAP | INT | LAST | BEST | SECTORES / STINTS | LAPS | PARADAS | NEUMÁTICO | ESTADO | DATA */}
       <div className="leaderboard-header-row">
         <span className="col-header-center">POS</span>
-        <span style={{ paddingLeft: '6px' }}>DRIVER</span>
+        <span style={{ paddingLeft: '6px' }}>PILOTO</span>
         <span className="col-header-center">GAP</span>
         <span className="col-header-center">INT</span>
-        <span className="col-header-center">LAST</span>
-        <span className="col-header-center">BEST</span>
+        <span className="col-header-center">ÚLTIMA</span>
+        <span className="col-header-center">MEJOR</span>
         <span className="col-header-center" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '4px' }}>
-          MINI-SECTORS (LAST / BEST) <span style={{ fontSize: '0.55rem', opacity: 0.6 }}>ⓘ</span>
+          {viewMode === 'stints' ? 'HISTORIAL DE STINTS Y NEUMÁTICOS' : 'MICROSECTORES (S1 • S2 • S3)'}
         </span>
-        <span className="col-header-center">LAPS</span>
-        <span className="col-header-center">PIT</span>
-        <span className="col-header-center">TYRE</span>
+        <span className="col-header-center" title="Vueltas completadas">VUEL.</span>
+        <span className="col-header-center" title="Número de paradas en boxes">PARADAS</span>
+        <span className="col-header-center" title="Compuesto actual, edad del neumático y estado">NEUMÁTICO</span>
+        <span className="col-header-center" title="Estado del monoplaza en pista">ESTADO</span>
         <span className="col-header-center" title="Historial de telemetría y vueltas">DATA</span>
       </div>
 
@@ -994,12 +1025,25 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
           );
 
           const isLeader = index === 0;
-          const displayedGap = isLeader ? '—' : (entry.gapToLeader ? entry.gapToLeader.replace('LÍDER', 'LEADER').replace('LIDER', 'LEADER') : '—');
-          const displayedInt = isLeader ? '—' : (entry.gapToAhead ? entry.gapToAhead.replace('LÍDER', 'LEADER').replace('LIDER', 'LEADER') : '—');
+          const p1BestSec = parseLapTimeToSec(entries[0]?.bestLapTime);
+          const prevBestSec = index > 0 ? parseLapTimeToSec(entries[index - 1]?.bestLapTime) : Infinity;
+          const bestSec = parseLapTimeToSec(entry.bestLapTime);
+
+          const rawGapStr = entry.gapToLeader ? entry.gapToLeader.replace('LÍDER', 'LEADER').replace('LIDER', 'LEADER') : '';
+          const computedGapFallback = (!isLeader && bestSec !== Infinity && p1BestSec !== Infinity && bestSec >= p1BestSec)
+            ? `+${(bestSec - p1BestSec).toFixed(3)}`
+            : '—';
+          const displayedGap = isLeader ? '—' : (rawGapStr && rawGapStr !== '—' && rawGapStr !== 'LEADER' ? rawGapStr : computedGapFallback);
+
+          const rawIntStr = entry.gapToAhead ? entry.gapToAhead.replace('LÍDER', 'LEADER').replace('LIDER', 'LEADER') : '';
+          const computedIntFallback = (!isLeader && bestSec !== Infinity && prevBestSec !== Infinity && bestSec >= prevBestSec)
+            ? `+${(bestSec - prevBestSec).toFixed(3)}`
+            : '—';
+          const displayedInt = isLeader ? '—' : (rawIntStr && rawIntStr !== '—' && rawIntStr !== 'LEADER' ? rawIntStr : computedIntFallback);
+
           const displayLast = entry.lastLapTime && entry.lastLapTime !== '--:--.---' ? entry.lastLapTime : (entry.currentLapTime || '—');
           const displayBest = entry.bestLapTime && entry.bestLapTime !== '--:--.---' ? entry.bestLapTime : '—';
           
-          const bestSec = parseLapTimeToSec(entry.bestLapTime);
           const isOverallBestLap = bestSec === minSessionBestSec && minSessionBestSec !== Infinity;
           const lapsCount = entry.lapsCompleted !== undefined ? entry.lapsCompleted : (entry.tyre?.age || 0);
 
@@ -1053,6 +1097,12 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
           // Resolve driver pit state accurately (preventing stale IN PIT when on track or OUT LAP)
           const isDriverPitOut = Boolean(entry.isPitOut && !entry.inPit);
           const isDriverInPit = Boolean(entry.inPit && !entry.isPitOut);
+          const hasActiveFlyingSegments = !isDriverInPit && !isDriverPitOut && (
+            (entry.s1Segments || []).some(s => s === 'purple' || s === 'green') ||
+            (entry.s2Segments || []).some(s => s === 'purple' || s === 'green') ||
+            (entry.s3Segments || []).some(s => s === 'purple' || s === 'green')
+          );
+          const isPushingLap = !isCurrentTabFinished && !isDriverInPit && !isDriverPitOut && (entry.currentLapTime === 'PUSH' || (isQualy && hasActiveFlyingSegments));
 
           return (
             <React.Fragment key={entry.driver.id}>
@@ -1121,8 +1171,8 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                   {!isOvertakeUp && !isOvertakeDown && (entry.previousPosition - entry.position) < 0 && <span style={{ fontSize: '0.48rem', color: '#ff4444', lineHeight: 1 }}>▼</span>}
                 </div>
 
-                {/* 2. DRIVER (Logo + Solid Team Color Driver Chip) */}
-                <div className="cell-driver-with-logo" style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                {/* 2. DRIVER (Logo + Solid Team Color Driver Chip + Surname) */}
+                <div className="cell-driver-with-logo" style={{ display: 'flex', alignItems: 'center', gap: '7px', minWidth: 0 }}>
                   <TeamLogo team={entry.driver.team} color={teamColor} size={24} />
                   <div
                     className="driver-team-chip"
@@ -1134,11 +1184,28 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                   >
                     {entry.driver.code}
                   </div>
+                  <span
+                    className="driver-lastname"
+                    style={{
+                      fontFamily: 'var(--font-display)',
+                      fontWeight: 700,
+                      fontSize: '0.78rem',
+                      color: '#f1f5f9',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}
+                    title={`${entry.driver.firstName} ${entry.driver.lastName} (#${entry.driver.number})`}
+                  >
+                    {entry.driver.lastName}
+                  </span>
                 </div>
 
                 {/* 3. GAP */}
-                <div className="cell-gap" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.82rem', fontWeight: 700, color: isLeader ? '#64748b' : '#cbd5e1' }}>
-                  {displayedGap}
+                <div className="cell-gap" style={{ textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: '0.82rem', fontWeight: 700, color: isLeader ? '#00e676' : '#cbd5e1' }}>
+                  {isLeader && isQualy ? (
+                    <span style={{ color: '#00e676', fontWeight: 900, fontSize: '0.74rem', letterSpacing: '0.04em' }}>POLE</span>
+                  ) : displayedGap}
                 </div>
 
                 {/* 4. INT */}
@@ -1171,66 +1238,244 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                   )}
                 </div>
 
-                {/* 7. MINI-SECTORS (S1, S2, S3 with 25 mini-ticks + Último & Mejor) */}
-                <div className="cell-mini-sectors" style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '10px',
-                  padding: '0 4px',
-                  minWidth: 0,
-                  flex: 1,
-                }}>
-                  <MiniSectorGroup
-                    lastTime={entry.s1Time || s1Best}
-                    bestTime={s1Best}
-                    status={entry.s1Status}
-                    bestStatus={s1BestStatus}
-                    segments={entry.s1Segments}
-                    count={8}
+                {/* 7. MINI-SECTORS OR STINTS STRATEGY VIEW */}
+                {viewMode === 'stints' ? (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '0 6px',
+                      minWidth: 0,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    {(entry.stints && entry.stints.length > 0 ? entry.stints : (hasTyre ? [entry.tyre] : [])).map((stint, sIdx) => {
+                      const stColor =
+                        stint.compound === 'SOFT'
+                          ? '#ff3b30'
+                          : stint.compound === 'MEDIUM'
+                          ? '#ffd60a'
+                          : stint.compound === 'HARD'
+                          ? '#ffffff'
+                          : stint.compound === 'INTERMEDIATE'
+                          ? '#34c759'
+                          : stint.compound === 'WET'
+                          ? '#007aff'
+                          : '#94a3b8';
+                      return (
+                        <div
+                          key={sIdx}
+                          style={{
+                            flex: Math.max(1, stint.age || 1),
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '6px',
+                            padding: '4px 8px',
+                            borderRadius: '6px',
+                            background: 'rgba(255, 255, 255, 0.05)',
+                            border: `1px solid ${stColor}55`,
+                            borderLeft: `3px solid ${stColor}`,
+                            minWidth: '64px',
+                          }}
+                          title={`Stint ${sIdx + 1}: ${stint.compound} (${stint.age} vueltas • ${stint.used ? 'Usado' : 'Nuevo'})`}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                            <span
+                              style={{
+                                width: '16px',
+                                height: '16px',
+                                borderRadius: '50%',
+                                border: `2px solid ${stColor}`,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '0.58rem',
+                                fontWeight: 900,
+                                color: stColor,
+                                fontFamily: 'var(--font-display)',
+                              }}
+                            >
+                              {stint.compound?.[0] || 'S'}
+                            </span>
+                            <span style={{ fontSize: '0.72rem', fontWeight: 800, color: '#f8fafc', fontFamily: 'var(--font-mono)' }}>
+                              {stint.age}v
+                            </span>
+                          </div>
+                          <span style={{ fontSize: '0.56rem', fontWeight: 700, color: stint.used ? '#94a3b8' : '#00e676', fontFamily: 'var(--font-mono)' }}>
+                            {stint.used ? 'USADO' : 'NUEVO'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <MiniSectorsTracker
+                    s1Segments={entry.s1Segments}
+                    s2Segments={entry.s2Segments}
+                    s3Segments={entry.s3Segments}
+                    s1Time={entry.s1Time || s1Best}
+                    s2Time={entry.s2Time || s2Best}
+                    s3Time={entry.s3Time || s3Best}
+                    s1BestTime={s1Best}
+                    s2BestTime={s2Best}
+                    s3BestTime={s3Best}
+                    s1Status={entry.s1Status}
+                    s2Status={entry.s2Status}
+                    s3Status={entry.s3Status}
+                    s1BestStatus={s1BestStatus}
+                    s2BestStatus={s2BestStatus}
+                    s3BestStatus={s3BestStatus}
+                    trackProgress={isCurrentTabFinished ? 1.0 : entry.trackProgress}
+                    driverStatus={isCurrentTabFinished ? 'PIT' : (isPushingLap ? 'PUSH' : isDriverInPit ? 'PIT' : 'ON_TRACK')}
+                    inPit={isCurrentTabFinished ? true : isDriverInPit}
+                    showTimes={true}
                   />
-                  <MiniSectorGroup
-                    lastTime={entry.s2Time || s2Best}
-                    bestTime={s2Best}
-                    status={entry.s2Status}
-                    bestStatus={s2BestStatus}
-                    segments={entry.s2Segments}
-                    count={8}
-                  />
-                  <MiniSectorGroup
-                    lastTime={entry.s3Time || s3Best}
-                    bestTime={s3Best}
-                    status={entry.s3Status}
-                    bestStatus={s3BestStatus}
-                    segments={entry.s3Segments}
-                    count={9}
-                  />
-                </div>
+                )}
 
                 {/* 8. LAPS */}
                 <div className="cell-laps-completed" style={{
                   textAlign: 'center',
                   fontFamily: 'var(--font-mono)',
-                  fontSize: '0.72rem',
-                  fontWeight: 700,
-                  color: '#94a3b8'
+                  fontSize: '0.78rem',
+                  fontWeight: 800,
+                  color: '#e2e8f0'
                 }}>
                   {lapsCount}
                 </div>
 
-                {/* 9. PIT */}
-                <div className="cell-pit-status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  {isDriverInPit ? (
-                    <span style={{
-                      background: 'rgba(37, 99, 235, 0.25)',
-                      border: '1px solid rgba(59, 130, 246, 0.5)',
-                      color: '#60a5fa',
-                      fontSize: '0.60rem',
+                {/* 9. PARADAS (Pit Stops Count) */}
+                <div className="cell-pit-stops" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <span
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '3px',
+                      minWidth: '38px',
+                      padding: '3px 7px',
+                      borderRadius: '5px',
+                      background: (entry.pitStops || 0) > 0 ? 'rgba(59, 130, 246, 0.16)' : 'rgba(255, 255, 255, 0.04)',
+                      border: `1px solid ${(entry.pitStops || 0) > 0 ? 'rgba(59, 130, 246, 0.38)' : 'rgba(255, 255, 255, 0.08)'}`,
+                      color: (entry.pitStops || 0) > 0 ? '#93c5fd' : '#64748b',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '0.74rem',
                       fontWeight: 800,
-                      padding: '2px 5px',
-                      borderRadius: '4px',
-                      letterSpacing: '0.03em',
+                    }}
+                    title={`${entry.pitStops || 0} parada(s) en boxes registradas`}
+                  >
+                    {entry.pitStops ?? 0}
+                    <span style={{ fontSize: '0.54rem', opacity: 0.75, fontWeight: 700 }}>PIT</span>
+                  </span>
+                </div>
+
+                {/* 10. NEUMÁTICO (Compound circle + Lap age + New/Used + Previous Stint Dots) */}
+                <div className="cell-tyre-clean" style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                }}>
+                  {hasTyre ? (
+                    <>
+                      {/* Previous stint mini dots if driver has pitted */}
+                      {entry.stints && entry.stints.length > 1 && (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }} title={`Historial: ${entry.stints.map(s => `${s.compound[0]}(${s.age}v)`).join(' → ')}`}>
+                          {entry.stints.slice(0, -1).slice(-2).map((prevStint, pIdx) => {
+                            const pCol =
+                              prevStint.compound === 'SOFT' ? '#ff3b30' :
+                              prevStint.compound === 'MEDIUM' ? '#ffd60a' :
+                              prevStint.compound === 'HARD' ? '#ffffff' :
+                              prevStint.compound === 'INTERMEDIATE' ? '#34c759' : '#007aff';
+                            return (
+                              <span
+                                key={pIdx}
+                                style={{
+                                  width: '8px',
+                                  height: '8px',
+                                  borderRadius: '50%',
+                                  border: `1.5px solid ${pCol}`,
+                                  background: 'rgba(0,0,0,0.6)',
+                                  display: 'inline-block',
+                                  opacity: 0.75,
+                                }}
+                              />
+                            );
+                          })}
+                        </div>
+                      )}
+                      <div
+                        style={{
+                          width: '22px',
+                          height: '22px',
+                          borderRadius: '50%',
+                          border: `2.5px solid ${compColor}`,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0,
+                          fontSize: '0.68rem',
+                          fontWeight: 900,
+                          fontFamily: 'var(--font-display)',
+                          color: compColor,
+                          background: 'rgba(0,0,0,0.65)',
+                          boxShadow: `0 0 8px ${compColor}33`,
+                        }}
+                        title={`${entry.tyre.compound} • ${entry.tyre.age} vueltas (${entry.tyre.used ? 'Usado' : 'Nuevo'})`}
+                      >
+                        {compoundLetter}
+                      </div>
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', lineHeight: 1.05 }}>
+                        <span style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '0.74rem',
+                          fontWeight: 800,
+                          color: '#f8fafc',
+                        }}>
+                          {entry.tyre.age}v
+                        </span>
+                        <span style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '0.52rem',
+                          fontWeight: 700,
+                          color: entry.tyre.used ? '#94a3b8' : '#00e676',
+                          letterSpacing: '0.02em',
+                        }}>
+                          {entry.tyre.used ? 'USADO' : 'NUEVO'}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <div style={{
+                      width: '18px',
+                      height: '18px',
+                      borderRadius: '50%',
+                      border: '1.5px solid #475569',
+                      background: 'rgba(255,255,255,0.03)',
+                    }} />
+                  )}
+                </div>
+
+                {/* 11. ESTADO (Track / Pit Status) */}
+                <div className="cell-pit-status" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {isCurrentTabFinished ? (
+                    <span className="qualy-pit-badge" style={{
+                      background: 'rgba(255, 255, 255, 0.08)',
+                      color: '#cbd5e1',
+                      border: '1px solid rgba(255, 255, 255, 0.2)',
+                      fontSize: '0.58rem',
+                      letterSpacing: '0.04em',
                     }}>
+                      BOX / FIN
+                    </span>
+                  ) : isDriverInPit ? (
+                    <span className="qualy-pit-badge">
                       IN PIT
+                    </span>
+                  ) : isPushingLap ? (
+                    <span className="qualy-push-badge">
+                      ⚡ PUSH
                     </span>
                   ) : isDriverPitOut ? (
                     <span style={{
@@ -1239,70 +1484,16 @@ export const Leaderboard: React.FC<LeaderboardProps> = ({
                       color: '#00e676',
                       fontSize: '0.58rem',
                       fontWeight: 800,
-                      padding: '2px 4px',
+                      padding: '2px 5px',
                       borderRadius: '4px',
+                      fontFamily: 'var(--font-mono)',
                     }}>
                       OUT LAP
                     </span>
                   ) : (
-                    <span style={{
-                      color: '#00e676',
-                      fontSize: '0.60rem',
-                      fontWeight: 700,
-                      fontFamily: 'var(--font-mono)',
-                      opacity: 0.85,
-                    }}>
-                      {entry.pitStops && entry.pitStops > 0 && !isTimedSession ? `${entry.pitStops}P` : 'PISTA'}
+                    <span className="qualy-track-badge">
+                      ● PISTA
                     </span>
-                  )}
-                </div>
-
-                {/* 10. TYRE (Compound circle + Lap count) */}
-                <div className="cell-tyre-clean" style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '4px',
-                }}>
-                  {hasTyre ? (
-                    <>
-                      <div
-                        style={{
-                          width: '18px',
-                          height: '18px',
-                          borderRadius: '50%',
-                          border: `2px solid ${compColor}`,
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          flexShrink: 0,
-                          fontSize: '0.62rem',
-                          fontWeight: 900,
-                          fontFamily: 'var(--font-display)',
-                          color: compColor,
-                          background: 'rgba(0,0,0,0.5)',
-                        }}
-                        title={`${entry.tyre.compound} (${entry.tyre.age} laps)`}
-                      >
-                        {compoundLetter}
-                      </div>
-                      <span style={{
-                        fontFamily: 'var(--font-mono)',
-                        fontSize: '0.68rem',
-                        fontWeight: 700,
-                        color: compColor,
-                      }}>
-                        {entry.tyre.age}
-                      </span>
-                    </>
-                  ) : (
-                    <div style={{
-                      width: '16px',
-                      height: '16px',
-                      borderRadius: '50%',
-                      border: '1.5px solid #475569',
-                      background: 'rgba(255,255,255,0.03)',
-                    }} />
                   )}
                 </div>
 

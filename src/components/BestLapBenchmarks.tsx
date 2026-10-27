@@ -255,7 +255,7 @@ export const BestLapBenchmarks: React.FC<BestLapBenchmarksProps> = ({
             textShadow: '0 0 14px rgba(211, 84, 255, 0.5)',
             lineHeight: 1.1,
           }}>
-            {sessionBestEntry?.bestLapTime || '1:34.284'}
+            {sessionBestEntry?.bestLapTime || '—:——.———'}
           </span>
 
           {sessionBestEntry && (

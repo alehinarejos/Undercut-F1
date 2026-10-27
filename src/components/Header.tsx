@@ -5,7 +5,8 @@ import {
   scheduleSyncService, 
   getGrandPrixTimeline, 
   getNextUpcomingGrandPrix, 
-  getRaceTargetTimestamp 
+  getRaceTargetTimestamp,
+  getEffectiveNowMs
 } from '../services/scheduleSyncService';
 import type { ScheduleSyncState } from '../services/scheduleSyncService';
 import { useLanguage } from '../context/LanguageContext';
@@ -64,11 +65,11 @@ export const Header: React.FC<HeaderProps> = ({
   }, []);
 
   // Real-time second clock
-  const [nowMs, setNowMs] = useState<number>(() => Date.now());
+  const [nowMs, setNowMs] = useState<number>(() => getEffectiveNowMs());
 
   useEffect(() => {
     const timer = setInterval(() => {
-      setNowMs(Date.now());
+      setNowMs(getEffectiveNowMs());
     }, 1000);
     return () => clearInterval(timer);
   }, []);
@@ -150,10 +151,10 @@ export const Header: React.FC<HeaderProps> = ({
   });
 
   useEffect(() => {
-    const targetTime = isNaN(targetStartTime) ? Date.now() : targetStartTime;
+    const targetTime = isNaN(targetStartTime) ? getEffectiveNowMs() : targetStartTime;
 
     const updateCountdown = () => {
-      const diff = Math.max(0, targetTime - Date.now());
+      const diff = Math.max(0, targetTime - getEffectiveNowMs());
       const days = Math.floor(diff / (1000 * 60 * 60 * 24));
       const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
       const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
@@ -325,6 +326,7 @@ export const Header: React.FC<HeaderProps> = ({
                   <div className="circuit-title" style={{ fontSize: '0.80rem' }}>{getCompactGpName(upcomingGp.name)}</div>
                   <div className="circuit-session-type" style={{ color: '#00D7B6', fontWeight: 700, fontSize: '0.66rem' }}>
                     {(nextTargetSession as any)?.session?.name || (nextTargetSession as any)?.name || t('waiting')}
+                    {formatNextSessionInfo(nextTargetSession) ? ` • ${formatNextSessionInfo(nextTargetSession)}` : ''}
                   </div>
                 </div>
               </div>

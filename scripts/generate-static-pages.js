@@ -54,6 +54,10 @@ const routes = [
               <a href="/driver-standings" style="color: #ffd700; font-weight: 700; text-decoration: none; font-size: 1.1rem;">🏆 Mundial de Pilotos y Constructores &rarr;</a>
               <p style="color: #64748b; font-size: 0.9rem; margin-top: 0.25rem;">Clasificación actualizada del campeonato mundial de F1 2026, puntos, victorias y podios.</p>
             </li>
+            <li>
+              <a href="/glossary/undercut" style="color: #00d7b6; font-weight: 700; text-decoration: none; font-size: 1.1rem;">📘 ¿Qué es el Undercut en F1? &rarr;</a>
+              <p style="color: #64748b; font-size: 0.9rem; margin-top: 0.25rem;">Guía técnica de estrategia de paradas en boxes, delta de neumáticos Pirelli y telemetría en vivo.</p>
+            </li>
           </ul>
         </nav>
       </section>
@@ -196,7 +200,50 @@ const routes = [
         <nav aria-label="Enlaces rápidos" style="margin-top: 2rem; display: flex; gap: 1.5rem; flex-wrap: wrap;">
           <a href="/schedule" style="color: #a855f7; text-decoration: underline;">Consultar Próximos Horarios</a>
           <a href="/driver-standings" style="color: #ffd700; text-decoration: underline;">Ver Mundial de Pilotos</a>
+          <a href="/glossary/undercut" style="color: #00d7b6; text-decoration: underline;">¿Qué es el Undercut en F1?</a>
           <a href="/" style="color: #94a3b8; text-decoration: underline;">Volver al Dashboard</a>
+        </nav>
+      </section>
+    `,
+  },
+  {
+    path: '/glossary/undercut',
+    slug: 'glossary/undercut',
+    title: '¿Qué es el Undercut en F1? Estrategia de Boxes y Telemetría | UNDERCUT',
+    description: 'Descubre qué es el Undercut en Fórmula 1, cómo se calcula la ventana de parada en boxes, la diferencia con el Overcut y cómo detectarlo en tiempo real con la telemetría de Undercut F1.',
+    keywords: 'que es undercut f1, undercut formula 1, estrategia boxes f1, undercut vs overcut, telemetria undercut f1, tiempos en directo f1, pit stop window f1',
+    canonical: 'https://undercut-f1-live.vercel.app/glossary/undercut/',
+    heading: '¿Qué es el Undercut en Fórmula 1? Estrategia de Parada en Boxes y Telemetría',
+    content: `
+      <section class="seo-crawler-content" style="padding: 2rem; max-width: 1200px; margin: 0 auto; color: #e2e8f0; font-family: system-ui, -apple-system, sans-serif;">
+        <header>
+          <nav aria-label="Migas de pan" style="margin-bottom: 1rem; font-size: 0.9rem; color: #64748b;">
+            <a href="/" style="color: #38bdf8; text-decoration: none;">Inicio</a> &gt; <span>Glosario F1: ¿Qué es el Undercut?</span>
+          </nav>
+          <h1 style="color: #ffffff; font-size: 2rem; margin-bottom: 0.5rem;">¿Qué es el Undercut en Fórmula 1? Guía Técnica de Estrategia y Telemetría</h1>
+          <p style="color: #94a3b8; font-size: 1.1rem; line-height: 1.6;">
+            En Fórmula 1, el <strong>undercut</strong> es una maniobra estratégica de parada en boxes en la que el piloto perseguidor entra al pit lane antes que su rival directo para montar neumáticos nuevos (Pirelli C1–C5) y rodar más rápido en su vuelta de salida (<em>out-lap</em>), superando al líder cuando este realiza su parada en la vuelta siguiente.
+          </p>
+        </header>
+
+        <article style="margin: 2rem 0; padding: 1.5rem; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px;">
+          <h2 style="font-size: 1.3rem; color: #00d7b6; margin-bottom: 1rem;">Fórmula Matemática del Undercut en Tiempo Real</h2>
+          <p style="color: #cbd5e1; line-height: 1.6;">
+            Un undercut tiene éxito cuando la ganancia de ritmo del neumático nuevo en la vuelta de salida (<code>Delta Out-Lap</code>) más el tiempo ganado en la vuelta de entrada (<code>In-Lap</code>) supera la distancia en segundos que separaba a ambos monoplazas antes de la parada (generalmente entre <strong>1.5 y 2.8 segundos</strong>).
+          </p>
+          <h3 style="font-size: 1.15rem; color: #ffffff; margin-top: 1.25rem;">Cómo detectar un Undercut en vivo en UNDERCUT F1:</h3>
+          <ul style="color: #cbd5e1; line-height: 1.7;">
+            <li><strong>Intervalo (INT) menor a 2.5 segundos:</strong> Vigila la columna INT en el Live Timing.</li>
+            <li><strong>Edad del neumático (TYRE) alta:</strong> Cuando el stint supera las 16–22 vueltas y los tiempos caen más de 0.12s por vuelta.</li>
+            <li><strong>Microsectores verdes y púrpuras en la Out-Lap:</strong> Los 25 microsectores muestran al instante si el piloto que acaba de parar está recortando el delta necesario.</li>
+          </ul>
+        </article>
+
+        <nav aria-label="Enlaces rápidos" style="margin-top: 2rem; display: flex; gap: 1.5rem; flex-wrap: wrap;">
+          <a href="/live-timing" style="color: #00d7b6; font-weight: 700; text-decoration: underline;">Abrir Live Timing &amp; Telemetría en Directo</a>
+          <a href="/driver-standings" style="color: #ffd700; text-decoration: underline;">Ver Clasificación del Mundial 2026</a>
+          <a href="/schedule" style="color: #a855f7; text-decoration: underline;">Ver Calendario Oficial F1 2026</a>
+          <a href="/" style="color: #94a3b8; text-decoration: underline;">Volver al Dashboard Principal</a>
         </nav>
       </section>
     `,
@@ -260,6 +307,10 @@ for (const route of routes) {
     fs.writeFileSync(indexFilePath, renderedHtml, 'utf8');
 
     const flatFilePath = path.resolve(distDir, `${route.slug}.html`);
+    const flatParentDir = path.dirname(flatFilePath);
+    if (!fs.existsSync(flatParentDir)) {
+      fs.mkdirSync(flatParentDir, { recursive: true });
+    }
     fs.writeFileSync(flatFilePath, renderedHtml, 'utf8');
 
     console.log(`✅ [Route ${route.path}] Generated:`);

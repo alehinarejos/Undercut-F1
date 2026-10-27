@@ -58,8 +58,8 @@ export function normalizeErgastCircuitId(rawCircuitId?: string): string {
   return map[clean] || clean;
 }
 
-const STORAGE_KEY_LAST_CHECK = 'f1_schedule_last_weekly_check_v6';
-const STORAGE_KEY_CUSTOM_SCHEDULE = 'f1_schedule_synced_2026_v6';
+const STORAGE_KEY_LAST_CHECK = 'f1_schedule_last_weekly_check_v8';
+const STORAGE_KEY_CUSTOM_SCHEDULE = 'f1_schedule_synced_2026_v8';
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 class ScheduleSyncService {

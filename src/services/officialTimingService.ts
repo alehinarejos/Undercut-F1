@@ -250,11 +250,10 @@ export function buildBaselineOfficialSnapshot(): OfficialSessionSnapshot {
 export async function resolveOpenF1LatestSession(): Promise<any | null> {
   const currentYear = new Date().getFullYear();
   const endpoints = [
-    'https://api.openf1.org/v1/sessions?meeting_key=1308',
+    'https://api.openf1.org/v1/sessions?session_key=latest',
     'https://api.openf1.org/v1/sessions?year=current',
     `https://api.openf1.org/v1/sessions?year=${currentYear}`,
     'https://api.openf1.org/v1/sessions?year=2026',
-    'https://api.openf1.org/v1/sessions?session_key=latest',
     'https://api.openf1.org/v1/sessions',
   ];
 

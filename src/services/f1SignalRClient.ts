@@ -244,7 +244,15 @@ export class F1SignalRClient {
       const payload = msg.arguments[1];
 
       this.lastStreamPacketTime = Date.now();
-      if (this.connectionStatus !== 'live_streaming') {
+      const isLiveTelemetryTopic =
+        topic === 'CarData.z' ||
+        topic === 'CarData' ||
+        topic === 'Position.z' ||
+        topic === 'Position' ||
+        topic === 'TimingData' ||
+        topic === 'TimingAppData';
+
+      if (isLiveTelemetryTopic && this.connectionStatus !== 'live_streaming') {
         this.updateStatus('live_streaming', 'Transmitiendo telemetría oficial en directo');
       }
 

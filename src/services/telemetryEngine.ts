@@ -8,7 +8,8 @@ import type {
   PitPrediction,
   TelemetryComparisonPoint,
   TrackStatus,
-  SectorStatus
+  SectorStatus,
+  TyreInfo
 } from '../types/telemetry';
 import { DRIVERS } from '../data/drivers';
 import { CIRCUITS, CIRCUIT_MAP } from '../data/circuits';
@@ -17,6 +18,7 @@ import { getNextUpcomingGrandPrix, getGrandPrixTimeline, scheduleSyncService } f
 import type { LiveCarTelemetry } from './f1LiveWebSocketService';
 import { fetchOfficialSessionTiming } from './officialTimingService';
 import { sessionArchiveService } from './sessionArchiveService';
+import { mergeSectorDelta, type SegmentStatusType } from '../utils/microsectorParser';
 
 // Real recorded team radio communications from the last session (Monza GP 2026)
 const RECORDED_MONZA_RADIOS: TeamRadio[] = [
@@ -1110,11 +1112,18 @@ export class TelemetryEngine {
     teamColor: string;
     bestLapSec: number;
     bestLapFormatted: string;
+    lastLapFormatted?: string;
     s1: number | null;
     s2: number | null;
     s3: number | null;
     speedTrap: number | null;
     finalPosition: number;
+    lapsCompleted?: number;
+    pitStops?: number;
+    compound?: TyreInfo['compound'];
+    tyreAge?: number;
+    tyreUsed?: boolean;
+    stints?: TyreInfo[];
   }>) {
     if (!results || results.length === 0) return;
 
@@ -1173,7 +1182,8 @@ export class TelemetryEngine {
       existing.position = result.finalPosition;
       existing.previousPosition = existing.position;
       existing.bestLapTime = result.bestLapFormatted;
-      existing.currentLapTime = result.bestLapFormatted;
+      existing.lastLapTime = result.lastLapFormatted || result.bestLapFormatted;
+      existing.currentLapTime = result.lastLapFormatted || result.bestLapFormatted;
       existing.lastLapTimeNum = result.bestLapSec;
 
       if (result.s1 !== null) {
@@ -1189,10 +1199,22 @@ export class TelemetryEngine {
         existing.s3BestTime = result.s3.toFixed(3);
       }
 
-      // Assign sector status based on position
-      existing.s1Status = idx === 0 ? 'purple' : idx < 3 ? 'green' : 'yellow';
-      existing.s2Status = idx === 0 ? 'purple' : idx < 3 ? 'green' : 'yellow';
-      existing.s3Status = idx === 0 ? 'purple' : idx < 3 ? 'green' : 'yellow';
+      if (result.compound) {
+        existing.tyre = {
+          compound: result.compound,
+          age: result.tyreAge ?? existing.tyre?.age ?? 5,
+          used: result.tyreUsed ?? false,
+        };
+      }
+      if (result.stints && result.stints.length > 0) {
+        existing.stints = result.stints;
+      }
+      if (result.pitStops !== undefined) {
+        existing.pitStops = result.pitStops;
+      }
+      if (result.lapsCompleted !== undefined && result.lapsCompleted > 0) {
+        existing.lapsCompleted = result.lapsCompleted;
+      }
 
       if (result.speedTrap !== null) existing.speedTrap = result.speedTrap;
 
@@ -1225,6 +1247,27 @@ export class TelemetryEngine {
 
     // Re-sort leaderboard by final position
     this.leaderboard.sort((a, b) => a.position - b.position);
+
+    // Compute true session best sector times so only the fastest driver per sector is purple
+    let minS1 = Infinity;
+    let minS2 = Infinity;
+    let minS3 = Infinity;
+    for (const e of this.leaderboard) {
+      const v1 = parseFloat(e.s1BestTime || e.s1Time || '999');
+      const v2 = parseFloat(e.s2BestTime || e.s2Time || '999');
+      const v3 = parseFloat(e.s3BestTime || e.s3Time || '999');
+      if (!isNaN(v1) && v1 > 5 && v1 < minS1) minS1 = v1;
+      if (!isNaN(v2) && v2 > 5 && v2 < minS2) minS2 = v2;
+      if (!isNaN(v3) && v3 > 5 && v3 < minS3) minS3 = v3;
+    }
+    for (const e of this.leaderboard) {
+      const v1 = parseFloat(e.s1BestTime || e.s1Time || '999');
+      const v2 = parseFloat(e.s2BestTime || e.s2Time || '999');
+      const v3 = parseFloat(e.s3BestTime || e.s3Time || '999');
+      e.s1Status = !isNaN(v1) && Math.abs(v1 - minS1) < 0.001 ? 'purple' : 'green';
+      e.s2Status = !isNaN(v2) && Math.abs(v2 - minS2) < 0.001 ? 'purple' : 'green';
+      e.s3Status = !isNaN(v3) && Math.abs(v3 - minS3) < 0.001 ? 'purple' : 'green';
+    }
 
     // Update telemetry map for every car with their real speed data
     this.leaderboard.forEach((entry, idx) => {
@@ -1303,6 +1346,7 @@ export class TelemetryEngine {
         if (newEntry.s2Segments) existing.s2Segments = newEntry.s2Segments;
         if (newEntry.s3Segments) existing.s3Segments = newEntry.s3Segments;
         existing.tyre = newEntry.tyre;
+        if (newEntry.stints && newEntry.stints.length > 0) existing.stints = newEntry.stints;
         existing.pitStops = newEntry.pitStops;
         existing.inPit = newEntry.inPit;
         existing.isPitOut = newEntry.isPitOut;
@@ -1740,33 +1784,109 @@ export class TelemetryEngine {
         : [];
 
       if (sectorsList.length > 0) {
-        if (sectorsList[0]?.Value) {
-          entry.s1Time = sectorsList[0].Value;
+        const s0 = sectorsList[0];
+        const s1 = sectorsList[1];
+        const s2 = sectorsList[2];
+
+        const s0Val = s0?.Value || s0?.PreviousValue;
+        const s1Val = s1?.Value || s1?.PreviousValue;
+        const s2Val = s2?.Value || s2?.PreviousValue;
+
+        if (s0Val) {
+          entry.s1Time = s0Val;
+          const curBest = parseFloat(entry.s1BestTime || '999');
+          const newSec = parseFloat(s0Val);
+          if (!isNaN(newSec) && newSec > 5 && (isNaN(curBest) || newSec < curBest)) {
+            entry.s1BestTime = s0Val;
+          }
           hasNewLapOrSector = true;
         }
-        if (sectorsList[1]?.Value) {
-          entry.s2Time = sectorsList[1].Value;
+        if (s1Val) {
+          entry.s2Time = s1Val;
+          const curBest = parseFloat(entry.s2BestTime || '999');
+          const newSec = parseFloat(s1Val);
+          if (!isNaN(newSec) && newSec > 5 && (isNaN(curBest) || newSec < curBest)) {
+            entry.s2BestTime = s1Val;
+          }
           hasNewLapOrSector = true;
         }
-        if (sectorsList[2]?.Value) {
-          entry.s3Time = sectorsList[2].Value;
+        if (s2Val) {
+          entry.s3Time = s2Val;
+          const curBest = parseFloat(entry.s3BestTime || '999');
+          const newSec = parseFloat(s2Val);
+          if (!isNaN(newSec) && newSec > 5 && (isNaN(curBest) || newSec < curBest)) {
+            entry.s3BestTime = s2Val;
+          }
           hasNewLapOrSector = true;
         }
 
-        if (sectorsList[0]?.OverallFastest) entry.s1Status = 'purple';
-        else if (sectorsList[0]?.PersonalFastest) entry.s1Status = 'green';
+        if (s0?.OverallFastest || s0?.Status === 2051) entry.s1Status = 'purple';
+        else if (s0?.PersonalFastest || s0?.Status === 2049) entry.s1Status = 'green';
+        else if (s0?.Value) entry.s1Status = 'yellow';
 
-        if (sectorsList[1]?.OverallFastest) entry.s2Status = 'purple';
-        else if (sectorsList[1]?.PersonalFastest) entry.s2Status = 'green';
+        if (s1?.OverallFastest || s1?.Status === 2051) entry.s2Status = 'purple';
+        else if (s1?.PersonalFastest || s1?.Status === 2049) entry.s2Status = 'green';
+        else if (s1?.Value) entry.s2Status = 'yellow';
 
-        if (sectorsList[2]?.OverallFastest) entry.s3Status = 'purple';
-        else if (sectorsList[2]?.PersonalFastest) entry.s3Status = 'green';
+        if (s2?.OverallFastest || s2?.Status === 2051) entry.s3Status = 'purple';
+        else if (s2?.PersonalFastest || s2?.Status === 2049) entry.s3Status = 'green';
+        else if (s2?.Value) entry.s3Status = 'yellow';
+
+        if (s0?.Segments) {
+          const prevSegs = (entry.s1Segments || Array(8).fill('none')) as SegmentStatusType[];
+          entry.s1Segments = mergeSectorDelta(prevSegs, s0.Segments, 8) as SectorStatus[];
+        }
+        if (s1?.Segments) {
+          const prevSegs = (entry.s2Segments || Array(8).fill('none')) as SegmentStatusType[];
+          entry.s2Segments = mergeSectorDelta(prevSegs, s1.Segments, 8) as SectorStatus[];
+        }
+        if (s2?.Segments) {
+          const prevSegs = (entry.s3Segments || Array(9).fill('none')) as SegmentStatusType[];
+          entry.s3Segments = mergeSectorDelta(prevSegs, s2.Segments, 9) as SectorStatus[];
+        }
+      }
+
+      if (lineData.NumberOfLaps !== undefined) {
+        const laps = parseInt(String(lineData.NumberOfLaps), 10);
+        if (!isNaN(laps)) entry.lapsCompleted = laps;
+      }
+      if (lineData.Speeds?.ST?.Value) {
+        const st = parseFloat(String(lineData.Speeds.ST.Value));
+        if (!isNaN(st) && st > 50) entry.speedTrap = st;
+      }
+
+      // Stints & Tyres from TimingAppData
+      if (lineData.Stints) {
+        const rawStints = lineData.Stints;
+        const stintItems: any[] = Array.isArray(rawStints)
+          ? rawStints.filter(Boolean)
+          : typeof rawStints === 'object'
+          ? Object.keys(rawStints)
+              .filter(k => k !== '_kf')
+              .sort((a, b) => Number(a) - Number(b))
+              .map(k => rawStints[k])
+              .filter(Boolean)
+          : [];
+        if (stintItems.length > 0) {
+          const parsedStints = stintItems.map(st => {
+            const up = String(st.Compound || '').toUpperCase().trim();
+            const comp = (up.includes('HARD') || up === 'H' ? 'HARD' : up.includes('MED') || up === 'M' ? 'MEDIUM' : up.includes('INT') ? 'INTERMEDIATE' : up.includes('WET') ? 'WET' : 'SOFT') as any;
+            const age = st.TotalLaps !== undefined ? Math.max(1, Number(st.TotalLaps)) : (entry.tyre?.age || 1);
+            const used = String(st.New).toLowerCase() === 'false' || age > 1;
+            return { compound: comp, age, used };
+          });
+          entry.stints = parsedStints;
+          entry.tyre = parsedStints[parsedStints.length - 1];
+          if (parsedStints.length > 1) {
+            entry.pitStops = Math.max(entry.pitStops || 0, parsedStints.length - 1);
+          }
+        }
       }
 
       // Pit Stops & InPit status (mutually exclusive & cleared when setting flying sectors)
       if (lineData.NumberOfPitStops !== undefined) {
         const stops = parseInt(String(lineData.NumberOfPitStops), 10);
-        if (!isNaN(stops)) entry.pitStops = stops;
+        if (!isNaN(stops)) entry.pitStops = Math.max(stops, (entry.stints?.length || 1) - 1);
       }
       if (lineData.PitOut === true) {
         entry.isPitOut = true;

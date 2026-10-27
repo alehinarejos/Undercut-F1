@@ -4,33 +4,41 @@
   <!-- 1. HOME DASHBOARD / INICIO -->
   <url>
     <loc>https://undercut-f1-live.vercel.app/</loc>
-    <lastmod>2026-09-29</lastmod>
+    <lastmod>2026-10-27</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
 
-  <!-- 2. OFFICIAL F1 2026 SCHEDULE / CALENDARIO -->
+  <!-- 2. LIVE TIMING & TELEMETRY / TIEMPOS EN DIRECTO -->
+  <url>
+    <loc>https://undercut-f1-live.vercel.app/live-timing</loc>
+    <lastmod>2026-10-27</lastmod>
+    <changefreq>always</changefreq>
+    <priority>1.0</priority>
+  </url>
+
+  <!-- 3. OFFICIAL F1 2026 SCHEDULE / CALENDARIO -->
   <url>
     <loc>https://undercut-f1-live.vercel.app/schedule</loc>
-    <lastmod>2026-09-29</lastmod>
+    <lastmod>2026-10-27</lastmod>
     <changefreq>daily</changefreq>
     <priority>0.9</priority>
   </url>
 
-  <!-- 3. OFFICIAL DRIVER STANDINGS / MUNDIAL DE PILOTOS -->
+  <!-- 4. OFFICIAL DRIVER STANDINGS / MUNDIAL DE PILOTOS -->
   <url>
     <loc>https://undercut-f1-live.vercel.app/driver-standings</loc>
-    <lastmod>2026-09-29</lastmod>
+    <lastmod>2026-10-27</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.9</priority>
   </url>
 
-  <!-- 4. LIVE TIMING & TELEMETRY / TIEMPOS EN DIRECTO -->
+  <!-- 5. GLOSARIO TÉCNICO / ¿QUÉ ES EL UNDERCUT EN F1? -->
   <url>
-    <loc>https://undercut-f1-live.vercel.app/live-timing</loc>
-    <lastmod>2026-09-29</lastmod>
-    <changefreq>daily</changefreq>
-    <priority>0.9</priority>
+    <loc>https://undercut-f1-live.vercel.app/glossary/undercut/</loc>
+    <lastmod>2026-10-27</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.85</priority>
   </url>
 
 </urlset>

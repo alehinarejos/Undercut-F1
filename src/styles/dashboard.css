@@ -266,9 +266,9 @@
 /* Grid Layout for Live Timing Dashboard: exact full height of the leaderboard table */
 .telemetry-layout-grid {
   display: grid;
-  grid-template-columns: minmax(0, 3.8fr) minmax(290px, 1.2fr);
+  grid-template-columns: minmax(0, 3.85fr) minmax(300px, 1.15fr);
   align-items: stretch !important;
-  gap: 14px;
+  gap: 18px;
   height: auto !important;
   max-height: none !important;
   min-height: fit-content !important;
@@ -331,7 +331,7 @@
 .telemetry-right-panel {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   height: 100%;
   box-sizing: border-box;
   overflow-y: auto !important;

@@ -5,6 +5,7 @@ import {
   isGrandPrixCompleted, 
   isGrandPrixWeekendActive,
   getNextUpcomingGrandPrix, 
+  getGrandPrixTimeline,
   getRaceTargetTimestamp,
   getTimeRemaining,
 } from '../services/scheduleSyncService';
@@ -17,6 +18,7 @@ import {
   LayoutDashboard, 
   Filter 
 } from 'lucide-react';
+import { useLiveSession } from '../context/LiveSessionProvider';
 import '../styles/home-dashboard.css';
 
 interface HomeDashboardViewProps {
@@ -25,6 +27,7 @@ interface HomeDashboardViewProps {
 
 export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate }) => {
   const { t, language } = useLanguage();
+  const { activeSession } = useLiveSession();
   const [scheduleState, setScheduleState] = useState(scheduleSyncService.getState());
   const [standingsState, setStandingsState] = useState(standingsSyncService.getState());
 
@@ -44,26 +47,28 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate
   // Upcoming Grand Prix (dynamically next uncompleted race)
   const schedule = scheduleState.schedule;
   const nextGp = getNextUpcomingGrandPrix(schedule);
+  const timeline = getGrandPrixTimeline(nextGp);
+  const nextSessionItem = timeline.activeSession || timeline.nextSession || timeline.sessions[timeline.sessions.length - 1];
+  const raceSessionItem = timeline.sessions.find(s => s.session.type === 'Race') || timeline.sessions[timeline.sessions.length - 1];
+  const nextTargetTimestamp = nextSessionItem ? nextSessionItem.startTime : getRaceTargetTimestamp(nextGp);
+
   const completedCount = schedule.filter(gp => isGrandPrixCompleted(gp)).length;
   const seasonProgressPct = ((completedCount / schedule.length) * 100).toFixed(1);
 
-  // Live countdown state targeting next race
+  // Live countdown state targeting next upcoming session of the Grand Prix
   const [countdown, setCountdown] = useState(() => {
-    const targetDate = getRaceTargetTimestamp(nextGp);
-    return getTimeRemaining(targetDate);
+    return getTimeRemaining(nextTargetTimestamp);
   });
 
   useEffect(() => {
-    const targetDate = getRaceTargetTimestamp(nextGp);
-
     const tick = () => {
-      setCountdown(getTimeRemaining(targetDate));
+      setCountdown(getTimeRemaining(nextTargetTimestamp));
     };
 
     tick();
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
-  }, [nextGp]);
+  }, [nextTargetTimestamp]);
 
   // Circuit SVG outline for next GP
   const nextCircuit = CIRCUITS.find(c => c.id === nextGp.circuitId) || CIRCUITS[0];
@@ -207,7 +212,41 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate
         >
           <div className="f1-countdown-tag-row">
             <span className="f1-countdown-pill">R{nextGp.round}</span>
-            {isGrandPrixWeekendActive(nextGp) && (
+            {activeSession.status === 'LIVE' ? (
+              <span style={{
+                background: '#ff1801',
+                color: '#fff',
+                fontSize: '0.62rem',
+                fontWeight: 900,
+                padding: '2px 8px',
+                borderRadius: '4px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                boxShadow: '0 0 10px rgba(255, 24, 1, 0.5)',
+                fontFamily: 'var(--font-mono)',
+              }}>
+                <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#fff' }} />
+                🔴 {activeSession.sessionName.toUpperCase()} ({activeSession.qualyPhase})
+              </span>
+            ) : (activeSession.status === 'FINISHED' && isGrandPrixWeekendActive(nextGp)) ? (
+              <span style={{
+                background: 'rgba(255, 255, 255, 0.12)',
+                border: '1px solid rgba(255, 255, 255, 0.28)',
+                color: '#f8fafc',
+                fontSize: '0.62rem',
+                fontWeight: 900,
+                padding: '2px 8px',
+                borderRadius: '4px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '5px',
+                fontFamily: 'var(--font-mono)',
+                letterSpacing: '0.03em',
+              }}>
+                🏁 {activeSession.sessionName.toUpperCase()} - OFICIAL
+              </span>
+            ) : isGrandPrixWeekendActive(nextGp) && (
               <span style={{
                 background: '#ff1801',
                 color: '#fff',
@@ -225,7 +264,9 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate
                 EN CURSO / EN VIVO
               </span>
             )}
-            <span className="f1-countdown-title">{nextGp.country || nextGp.name}: {t('news_race_tag')}</span>
+            <span className="f1-countdown-title">
+              {nextGp.flag} {nextGp.country || nextGp.name}: {timeline.activeSession ? timeline.activeSession.session.name : (nextSessionItem?.session.name || t('news_race_tag'))}
+            </span>
           </div>
 
           <div className="f1-countdown-grid">
@@ -246,6 +287,58 @@ export const HomeDashboardView: React.FC<HomeDashboardViewProps> = ({ onNavigate
               <span className="f1-digit-label">{t('secs_short')}</span>
             </div>
           </div>
+
+          {timeline.activeSession ? (
+            <div style={{
+              marginTop: '10px',
+              padding: '6px 10px',
+              background: 'rgba(0, 0, 0, 0.35)',
+              borderRadius: '6px',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.68rem',
+              flexWrap: 'wrap',
+              gap: '6px',
+            }}>
+              <span style={{ color: '#fff', fontWeight: 700 }}>
+                ⚡ SESIÓN EN DIRECTO: <strong style={{ color: '#ffd60a' }}>{timeline.activeSession.session.name.toUpperCase()}</strong>
+              </span>
+              <span style={{ color: '#00e676', fontWeight: 800 }}>
+                VER TELEMETRÍA EN DIRECTO →
+              </span>
+            </div>
+          ) : nextSessionItem ? (
+            <div style={{
+              marginTop: '10px',
+              padding: '7px 11px',
+              background: 'rgba(0, 0, 0, 0.32)',
+              borderRadius: '6px',
+              border: '1px solid rgba(255, 255, 255, 0.16)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '0.68rem',
+              flexWrap: 'wrap',
+              gap: '8px',
+            }}>
+              <span style={{ color: '#fff', fontWeight: 700 }}>
+                ⏱️ PRÓXIMA SESIÓN: <strong style={{ color: '#ffd60a' }}>{nextSessionItem.session.name.toUpperCase()}</strong> ({nextSessionItem.formattedDate} • {nextSessionItem.formattedTime}h)
+              </span>
+              {raceSessionItem && raceSessionItem.session.name !== nextSessionItem.session.name ? (
+                <span style={{ color: 'rgba(255,255,255,0.88)', fontWeight: 700 }}>
+                  🏁 CARRERA: {raceSessionItem.formattedDate} • {raceSessionItem.formattedTime}h
+                </span>
+              ) : (
+                <span style={{ color: '#60a5fa', fontWeight: 800 }}>
+                  IR AL LIVE TIMING →
+                </span>
+              )}
+            </div>
+          ) : null}
         </div>
 
         {/* Card 2: 2026 Schedule Card */}

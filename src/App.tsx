@@ -28,6 +28,7 @@ import { F1_SCHEDULE } from './data/schedule';
 import { scheduleSyncService, getNextUpcomingGrandPrix, getGrandPrixTimeline } from './services/scheduleSyncService';
 import { sessionLifecycleService } from './services/sessionLifecycleService';
 import { useLanguage } from './context/LanguageContext';
+import { useLiveSession } from './context/LiveSessionProvider';
 import { 
   getRouteFromPathname, 
   getPathnameForRoute, 
@@ -49,6 +50,10 @@ import './styles/sidebar-drawer.css';
 
 export const App: React.FC = () => {
   const { t, language } = useLanguage();
+  const {
+    activeSession: ssotSession,
+    leaderboard: ssotLeaderboard,
+  } = useLiveSession();
   // Telemetry Engine (connected to realistic data stream & official fallback)
   const engineRef = useRef<TelemetryEngine | null>(null);
 
@@ -342,7 +347,7 @@ export const App: React.FC = () => {
       const active = getCurrentScheduledSession();
       const wsStatus = f1LiveWebSocketService.getSessionStatus();
       const isWsLive = wsStatus.sessionStatus === 'Started' && !wsStatus.isFinished && !wsStatus.isChequered;
-      const isSignalRLive = f1SignalR.getStatus() === 'live_streaming' && !wsStatus.isFinished && !wsStatus.isChequered;
+      const isSignalRLive = Boolean(active) && f1SignalR.getStatus() === 'live_streaming' && !wsStatus.isFinished && !wsStatus.isChequered;
 
       // Trigger autonomous lifecycle check
       sessionLifecycleService.checkSessionTransition(false).catch(() => {});
@@ -501,7 +506,7 @@ export const App: React.FC = () => {
       onStatusChange: (status, details) => {
         setSignalRStatus(status);
         if (details) setSignalRDetails(details);
-        if (status === 'live_streaming') {
+        if (status === 'live_streaming' && getCurrentScheduledSession() !== null) {
           setIsOfficialLive(true);
         }
       },
@@ -679,8 +684,8 @@ export const App: React.FC = () => {
     try {
       const status = await officialF1Api.checkLiveStatus();
       setOfficialStatusMessage(status.statusMessage);
-      // Only override with API data if SignalR says we're live_streaming (real live feed connected)
-      if (signalRStatus === 'live_streaming') {
+      // Only override with API data if SignalR says we're live_streaming during a scheduled live session
+      if (signalRStatus === 'live_streaming' && getCurrentScheduledSession() !== null) {
         setIsOfficialLive(true);
       }
     } catch {
@@ -776,25 +781,52 @@ export const App: React.FC = () => {
           ? status.remainingSec
           : (activeSched?.remainingSec || undefined);
 
+        const resolvedTrackStatus: TrackStatus =
+          status.isRedFlag || status.trackStatus === '5'
+            ? 'RED'
+            : status.safetyCar || status.trackStatus === '4'
+            ? 'SC'
+            : status.vsc || status.trackStatus === '6' || status.trackStatus === '7'
+            ? 'VSC'
+            : status.trackStatus === '2'
+            ? 'YELLOW'
+            : 'GREEN';
+
         engine.updateLiveSessionState({
           name: status.sessionName || undefined,
           type: status.sessionType ? sessType : undefined,
-          trackStatus: status.safetyCar ? 'SC' : status.vsc ? 'VSC' : 'GREEN',
+          trackStatus: resolvedTrackStatus,
           safetyCarDeployed: !!status.safetyCar,
           vscDeployed: !!status.vsc,
           timeRemainingSec: resolvedRemainingSec,
-          totalLaps: (sessType === 'PRACTICE' || sessType === 'QUALIFYING') ? 0 : undefined,
+          currentLap: status.currentLap || undefined,
+          totalLaps: (sessType === 'PRACTICE' || sessType === 'QUALIFYING') ? 0 : (status.totalLaps || undefined),
+          ...(status.weather ? {
+            airTemp: status.weather.airTemp,
+            trackTemp: status.weather.trackTemp,
+            humidity: status.weather.humidity,
+            windSpeed: status.weather.windSpeed,
+            rainProbability: status.weather.rainProbability,
+          } : {}),
         });
 
         setSession(prev => ({
           ...prev,
           name: status.sessionName || prev.name,
           type: status.sessionType ? sessType : prev.type,
-          trackStatus: status.safetyCar ? 'SC' : status.vsc ? 'VSC' : 'GREEN',
+          trackStatus: resolvedTrackStatus,
           safetyCarDeployed: !!status.safetyCar,
           vscDeployed: !!status.vsc,
           timeRemainingSec: resolvedRemainingSec !== undefined ? resolvedRemainingSec : prev.timeRemainingSec,
-          totalLaps: (sessType === 'PRACTICE' || sessType === 'QUALIFYING') ? 0 : prev.totalLaps,
+          currentLap: status.currentLap || prev.currentLap,
+          totalLaps: (sessType === 'PRACTICE' || sessType === 'QUALIFYING') ? 0 : (status.totalLaps || prev.totalLaps),
+          ...(status.weather ? {
+            airTemp: status.weather.airTemp,
+            trackTemp: status.weather.trackTemp,
+            humidity: status.weather.humidity,
+            windSpeed: status.weather.windSpeed,
+            rainProbability: status.weather.rainProbability,
+          } : {}),
         }));
       }
     });
@@ -919,23 +951,18 @@ export const App: React.FC = () => {
                 {/* Panel Izquierdo: Tabla de Tiempos (Full Height, 80% Ancho) */}
                 <div className="telemetry-left-panel" ref={leftPanelRef}>
                   {(() => {
-                    const liveActive = getCurrentScheduledSession();
-                    const effectiveSessionName = liveActive
-                      ? `${liveActive.gp.name} - ${liveActive.sess.name}`
-                      : session.name;
-                    const effectiveRemainingSec = liveActive
-                      ? Math.max(0, Math.round(liveActive.remainingSec))
-                      : session.timeRemainingSec;
-                    const effectiveTrackStatus = liveActive && session.trackStatus === 'CHEQUERED'
-                      ? 'GREEN'
-                      : session.trackStatus;
+                    const displayLeaderboard = leaderboard && leaderboard.length > 0 ? leaderboard : ssotLeaderboard;
+                    const effectiveSessionName = session.name || ssotSession.sessionName;
+                    const effectiveRemainingSec = session.timeRemainingSec !== undefined ? session.timeRemainingSec : ssotSession.remainingSec;
+                    const effectiveTrackStatus = session.trackStatus || ssotSession.trackStatus;
+                    const effectiveSessionType = session.type || ssotSession.sessionType;
                     return (
                       <Leaderboard
-                        entries={leaderboard}
+                        entries={displayLeaderboard}
                         selectedDriverId={selectedDriverId}
                         onSelectDriver={handleSelectDriver}
-                        isQualifying={session.type === 'QUALIFYING'}
-                        sessionType={session.type}
+                        isQualifying={effectiveSessionType === 'QUALIFYING'}
+                        sessionType={effectiveSessionType}
                         sessionName={effectiveSessionName}
                         sessionId={session.id}
                         timeRemainingSec={effectiveRemainingSec}
@@ -955,30 +982,37 @@ export const App: React.FC = () => {
                   }}
                 >
                   {/* 1. Tarjeta de Seguimiento del Piloto Seleccionado (Vuelta en Directo) */}
-                  <DriverLapTracker
-                    entry={leaderboard.find(e => e.driver.id === selectedDriverId) || leaderboard[0]}
-                    allEntries={leaderboard}
-                    onSelectDriver={handleSelectDriver}
-                  />
+                  {(() => {
+                    const displayLeaderboard = leaderboard && leaderboard.length > 0 ? leaderboard : ssotLeaderboard;
+                    return (
+                      <>
+                        <DriverLapTracker
+                          entry={displayLeaderboard.find(e => e.driver.id === selectedDriverId) || displayLeaderboard[0]}
+                          allEntries={displayLeaderboard}
+                          onSelectDriver={handleSelectDriver}
+                        />
 
-                  {/* 2. Best Lap Benchmarks (Session Best, Weekend Best, Circuit Record) */}
-                  <BestLapBenchmarks
-                    entries={leaderboard}
-                    sessionName={session.name || 'Practice 3'}
-                    circuitName={session.circuit.name}
-                    circuit={session.circuit}
-                  />
+                        {/* 2. Best Lap Benchmarks (Session Best, Weekend Best, Circuit Record) */}
+                        <BestLapBenchmarks
+                          entries={displayLeaderboard}
+                          sessionName={session.name || ssotSession.sessionName || 'Qualifying'}
+                          circuitName={session.circuit.name}
+                          circuit={session.circuit}
+                        />
 
-                  {/* 3. Control de Carrera y Radios de Equipo */}
-                  <div className="telemetry-rc-section" style={{ flex: '1 1 0', minHeight: '160px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                    <RaceControl
-                      messages={raceControlMessages}
-                      radios={teamRadios}
-                    />
-                  </div>
+                        {/* 3. Control de Carrera y Radios de Equipo */}
+                        <div className="telemetry-rc-section" style={{ flex: '1 1 0', minHeight: '160px', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                          <RaceControl
+                            messages={raceControlMessages}
+                            radios={teamRadios}
+                          />
+                        </div>
 
-                  {/* 4. Más Rápido por Sector */}
-                  <FastestBySector entries={leaderboard} />
+                        {/* 4. Más Rápido por Sector */}
+                        <FastestBySector entries={displayLeaderboard} />
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
             </>
@@ -1001,10 +1035,10 @@ export const App: React.FC = () => {
         </div>
       </main>
 
-      {/* Footer Disclaimer */}
+      {/* Footer Navigation & Legal Disclaimer (SEO Crawlable Internal Links) */}
       <footer style={{
         marginTop: 'auto',
-        padding: '24px 20px',
+        padding: '28px 20px',
         borderTop: '1px solid var(--f1-border)',
         background: 'rgba(8, 10, 15, 0.95)',
         textAlign: 'center',
@@ -1012,6 +1046,55 @@ export const App: React.FC = () => {
         color: 'var(--text-muted)',
         fontFamily: 'var(--font-mono)'
       }}>
+        <nav
+          aria-label="Enlaces principales de Undercut F1"
+          style={{
+            display: 'flex',
+            justifyContent: 'center',
+            flexWrap: 'wrap',
+            gap: '18px',
+            marginBottom: '14px',
+            fontFamily: 'var(--font-display)',
+            fontSize: '0.76rem',
+            fontWeight: 700,
+          }}
+        >
+          <a
+            href="/"
+            onClick={(e) => { e.preventDefault(); setActiveTab('home'); }}
+            style={{ color: activeTab === 'home' ? '#00D7B6' : '#cbd5e1', textDecoration: 'none' }}
+          >
+            Dashboard F1 2026
+          </a>
+          <a
+            href="/live-timing"
+            onClick={(e) => { e.preventDefault(); setActiveTab('timing'); }}
+            style={{ color: activeTab === 'timing' ? '#00D7B6' : '#cbd5e1', textDecoration: 'none' }}
+          >
+            Live Timing & Telemetría en Directo
+          </a>
+          <a
+            href="/driver-standings"
+            onClick={(e) => { e.preventDefault(); setActiveTab('leaderboard'); }}
+            style={{ color: activeTab === 'leaderboard' ? '#00D7B6' : '#cbd5e1', textDecoration: 'none' }}
+          >
+            Clasificación Mundial F1 2026
+          </a>
+          <a
+            href="/schedule"
+            onClick={(e) => { e.preventDefault(); setActiveTab('schedule'); }}
+            style={{ color: activeTab === 'schedule' ? '#00D7B6' : '#cbd5e1', textDecoration: 'none' }}
+          >
+            Calendario F1 2026 (24 GP)
+          </a>
+          <a
+            href="/glossary/undercut"
+            onClick={(e) => { e.preventDefault(); setActiveTab('glossary'); }}
+            style={{ color: activeTab === 'glossary' ? '#00D7B6' : '#cbd5e1', textDecoration: 'none' }}
+          >
+            ¿Qué es el Undercut en F1? (Glosario)
+          </a>
+        </nav>
         <p style={{ maxWidth: '820px', margin: '0 auto 8px auto', lineHeight: 1.5 }}>
           {t('footer_text')}
         </p>

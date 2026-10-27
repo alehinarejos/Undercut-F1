@@ -77,11 +77,18 @@ export interface BestLapResult {
   teamColor: string;
   bestLapSec: number;
   bestLapFormatted: string;
+  lastLapFormatted?: string;
   s1: number | null;
   s2: number | null;
   s3: number | null;
   speedTrap: number | null;
   finalPosition: number;
+  lapsCompleted?: number;
+  pitStops?: number;
+  compound?: 'SOFT' | 'MEDIUM' | 'HARD' | 'INTERMEDIATE' | 'WET';
+  tyreAge?: number;
+  tyreUsed?: boolean;
+  stints?: Array<{ compound: 'SOFT' | 'MEDIUM' | 'HARD' | 'INTERMEDIATE' | 'WET'; age: number; used: boolean }>;
 }
 
 export interface LiveSessionStatus {
@@ -185,9 +192,9 @@ class OfficialF1Service {
         activeSession: isLive ? latest : null,
         latestCompletedSession: latest,
         nextSession: {
-          name: 'FP2 - GP de España (Madrid)',
-          circuit: 'Madring',
-          dateStart: '2026-09-11T15:00:00Z',
+          name: 'Libres 1 (FP1) - GP de México',
+          circuit: 'Hermanos Rodríguez',
+          dateStart: '2026-10-30T18:30:00Z',
         },
       };
     } catch {
@@ -197,9 +204,9 @@ class OfficialF1Service {
         activeSession: null,
         latestCompletedSession: null,
         nextSession: {
-          name: 'FP2 - GP de España (Madrid)',
-          circuit: 'Madring',
-          dateStart: '2026-09-11T15:00:00Z',
+          name: 'Libres 1 (FP1) - GP de México',
+          circuit: 'Hermanos Rodríguez',
+          dateStart: '2026-10-30T18:30:00Z',
         },
       };
     }
@@ -232,14 +239,16 @@ class OfficialF1Service {
   }
 
   /**
-   * Get ALL laps for a session and compute best lap per driver
+   * Get ALL laps, stints, and pit stops for a session and compute best lap & tyre/pit stats per driver
    */
   public async getSessionBestLaps(sessionKey: number): Promise<BestLapResult[]> {
     try {
-      const [lapsRes, posRes, driversRes] = await Promise.all([
+      const [lapsRes, posRes, driversRes, stintsRes, pitRes] = await Promise.all([
         fetch(`${this.baseUrl}/laps?session_key=${sessionKey}`),
         fetch(`${this.baseUrl}/position?session_key=${sessionKey}`),
         fetch(`${this.baseUrl}/drivers?session_key=${sessionKey}`),
+        fetch(`${this.baseUrl}/stints?session_key=${sessionKey}`),
+        fetch(`${this.baseUrl}/pit?session_key=${sessionKey}`),
       ]);
 
       if (!lapsRes.ok) return [];
@@ -247,31 +256,97 @@ class OfficialF1Service {
       const laps: OpenF1Lap[] = await lapsRes.json();
       const positions: OpenF1Position[] = posRes.ok ? await posRes.json() : [];
       const drivers: OpenF1Driver[] = driversRes.ok ? await driversRes.json() : [];
+      const stintsRaw: any[] = stintsRes.ok ? await stintsRes.json() : [];
+      const pitsRaw: any[] = pitRes.ok ? await pitRes.json() : [];
+
+      const normalizeCompound = (raw?: string): 'SOFT' | 'MEDIUM' | 'HARD' | 'INTERMEDIATE' | 'WET' => {
+        const up = String(raw || '').toUpperCase().trim();
+        if (up.includes('HARD') || up === 'H' || up === 'C1' || up === 'C2') return 'HARD';
+        if (up.includes('MED') || up === 'M' || up === 'C3') return 'MEDIUM';
+        if (up.includes('INT') || up === 'I') return 'INTERMEDIATE';
+        if (up.includes('WET') || up === 'W') return 'WET';
+        return 'SOFT';
+      };
 
       // Build driver map
       const driverMap = new Map<number, OpenF1Driver>();
       drivers.forEach(d => driverMap.set(d.driver_number, d));
 
-      // Compute best lap per driver (exclude pit-out laps and null durations)
+      // Compute stints per driver
+      const driverStintsMap = new Map<number, Array<{ stintNumber: number; compound: 'SOFT' | 'MEDIUM' | 'HARD' | 'INTERMEDIATE' | 'WET'; age: number; used: boolean; lapEnd: number }>>();
+      if (Array.isArray(stintsRaw)) {
+        for (const st of stintsRaw) {
+          const dNum = Number(st.driver_number);
+          if (!dNum) continue;
+          const lapStart = Number(st.lap_start) || 1;
+          const lapEnd = Number(st.lap_end) || lapStart;
+          const ageAtStart = Number(st.tyre_age_at_start) || 0;
+          const stintLaps = Math.max(1, lapEnd - lapStart + 1);
+          const totalAge = ageAtStart + stintLaps;
+          const list = driverStintsMap.get(dNum) || [];
+          list.push({
+            stintNumber: Number(st.stint_number) || (list.length + 1),
+            compound: normalizeCompound(st.compound),
+            age: totalAge,
+            used: ageAtStart > 0,
+            lapEnd,
+          });
+          driverStintsMap.set(dNum, list);
+        }
+        driverStintsMap.forEach((list, k) => {
+          list.sort((a, b) => a.stintNumber - b.stintNumber);
+          driverStintsMap.set(k, list);
+        });
+      }
+
+      // Compute pit stop count per driver from /pit endpoint
+      const driverPitCountMap = new Map<number, number>();
+      if (Array.isArray(pitsRaw)) {
+        for (const p of pitsRaw) {
+          const dNum = Number(p.driver_number);
+          if (!dNum) continue;
+          driverPitCountMap.set(dNum, (driverPitCountMap.get(dNum) || 0) + 1);
+        }
+      }
+
+      // Compute best lap, last lap, and max lap number per driver
       const bestLaps = new Map<number, {
         dur: number;
+        lastDur: number;
         s1: number | null;
         s2: number | null;
         s3: number | null;
         speedTrap: number | null;
+        maxLap: number;
       }>();
 
       laps.forEach(lap => {
-        if (!lap.lap_duration || lap.is_pit_out_lap) return;
-        const existing = bestLaps.get(lap.driver_number);
-        if (!existing || lap.lap_duration < existing.dur) {
+        const prev = bestLaps.get(lap.driver_number);
+        const maxLap = Math.max(prev?.maxLap || 0, Number(lap.lap_number) || 0);
+        if (!lap.lap_duration || lap.is_pit_out_lap) {
+          if (prev) prev.maxLap = maxLap;
+          return;
+        }
+        if (!prev) {
           bestLaps.set(lap.driver_number, {
             dur: lap.lap_duration,
+            lastDur: lap.lap_duration,
             s1: lap.duration_sector_1,
             s2: lap.duration_sector_2,
             s3: lap.duration_sector_3,
             speedTrap: lap.st_speed,
+            maxLap,
           });
+        } else {
+          prev.lastDur = lap.lap_duration;
+          prev.maxLap = maxLap;
+          if (lap.lap_duration < prev.dur) {
+            prev.dur = lap.lap_duration;
+            prev.s1 = lap.duration_sector_1 ?? prev.s1;
+            prev.s2 = lap.duration_sector_2 ?? prev.s2;
+            prev.s3 = lap.duration_sector_3 ?? prev.s3;
+            prev.speedTrap = lap.st_speed ?? prev.speedTrap;
+          }
         }
       });
 
@@ -281,10 +356,18 @@ class OfficialF1Service {
         finalPositions.set(p.driver_number, p.position);
       });
 
-      // Build results sorted by best lap time
+      // Build results
       const results: BestLapResult[] = [];
       bestLaps.forEach((lap, driverNum) => {
         const driver = driverMap.get(driverNum);
+        const stints = driverStintsMap.get(driverNum) || [];
+        const latestStint = stints.length > 0 ? stints[stints.length - 1] : undefined;
+        const stintBasedPits = stints.length > 1 ? stints.length - 1 : 0;
+        const explicitPits = driverPitCountMap.get(driverNum) || 0;
+        const pitStops = Math.max(explicitPits, stintBasedPits);
+        const maxStintLap = stints.reduce((acc, s) => Math.max(acc, s.lapEnd), 0);
+        const lapsCompleted = Math.max(lap.maxLap, maxStintLap);
+
         results.push({
           driverNumber: driverNum,
           nameAcronym: driver?.name_acronym || String(driverNum),
@@ -292,16 +375,28 @@ class OfficialF1Service {
           teamColor: driver?.team_colour ? `#${driver.team_colour}` : '#ffffff',
           bestLapSec: lap.dur,
           bestLapFormatted: formatLapTime(lap.dur),
+          lastLapFormatted: formatLapTime(lap.lastDur),
           s1: lap.s1,
           s2: lap.s2,
           s3: lap.s3,
           speedTrap: lap.speedTrap,
           finalPosition: finalPositions.get(driverNum) || 99,
+          lapsCompleted,
+          pitStops,
+          compound: latestStint?.compound || 'MEDIUM',
+          tyreAge: latestStint?.age || Math.max(1, lapsCompleted),
+          tyreUsed: latestStint?.used ?? false,
+          stints: stints.map(s => ({ compound: s.compound, age: s.age, used: s.used })),
         });
       });
 
-      // Sort by best lap time (practice/qualifying) — P1 = fastest
-      results.sort((a, b) => a.bestLapSec - b.bestLapSec);
+      // Sort by finalPosition if available (e.g. Race), or by bestLapSec
+      results.sort((a, b) => {
+        if (a.finalPosition !== 99 && b.finalPosition !== 99 && a.finalPosition !== b.finalPosition) {
+          return a.finalPosition - b.finalPosition;
+        }
+        return a.bestLapSec - b.bestLapSec;
+      });
 
       // Re-assign sequential positions
       results.forEach((r, i) => { r.finalPosition = i + 1; });

@@ -3,7 +3,7 @@ import { inflateRaw } from 'pako';
 import type { LeaderboardEntry, SectorStatus, TyreCompound, RaceControlMessage } from '../types/telemetry';
 import { DRIVERS } from '../data/drivers';
 import { standingsSyncService } from './standingsSyncService';
-import { scheduleSyncService } from './scheduleSyncService';
+import { scheduleSyncService, resolveCurrentOrNextGrandPrix } from './scheduleSyncService';
 
 export interface LiveCarTelemetry {
   driverNumber: number;
@@ -110,6 +110,16 @@ export interface F1LiveSessionStatus {
   safetyCar?: boolean;
   vsc?: boolean;
   finishedUtc?: string;
+  currentLap?: number;
+  totalLaps?: number;
+  weather?: {
+    airTemp: number;
+    trackTemp: number;
+    humidity: number;
+    windSpeed: number;
+    windDirection: number;
+    rainProbability: number;
+  };
 }
 
 export class F1LiveWebSocketService {
@@ -163,7 +173,7 @@ export class F1LiveWebSocketService {
   public requestFullState(): void {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       try {
-        this.ws.send(encode({ type: 'get:state' }));
+        this.ws.send(encode({ type: 'get:state' }) as any);
       } catch (e) {
         console.warn('[F1LiveWS] Failed to send get:state:', e);
       }
@@ -355,7 +365,7 @@ export class F1LiveWebSocketService {
         this.ws = socket;
         this.isConnecting = false;
         try {
-          socket.send(encode({ type: 'get:state' }));
+          socket.send(encode({ type: 'get:state' }) as any);
         } catch (e) {
           console.warn('[F1LiveWS] Failed to send get:state:', e);
         }
@@ -413,6 +423,12 @@ export class F1LiveWebSocketService {
       if (msg.R.TrackStatus) {
         this.processTrackStatus(msg.R.TrackStatus);
       }
+      if (msg.R.WeatherData) {
+        this.processWeatherData(msg.R.WeatherData);
+      }
+      if (msg.R.LapCount) {
+        this.processLapCount(msg.R.LapCount);
+      }
       if (msg.R.RaceControlMessages) {
         this.processRaceControlMessages(msg.R.RaceControlMessages);
       }
@@ -460,6 +476,10 @@ export class F1LiveWebSocketService {
           this.processSessionInfo(data);
         } else if (topic === 'TrackStatus') {
           this.processTrackStatus(data);
+        } else if (topic === 'WeatherData') {
+          this.processWeatherData(data);
+        } else if (topic === 'LapCount') {
+          this.processLapCount(data);
         } else if (topic === 'RaceControlMessages') {
           this.processRaceControlMessages(data);
         } else if (topic === 'CarData.z' || topic === 'CarData') {
@@ -647,11 +667,12 @@ export class F1LiveWebSocketService {
         status === 'Ends' ||
         status === 'Aborted';
 
-      // If the finished timestamp is older than 90 min, it's stale data from a previous session
+      // Only ignore an older finished timestamp if a NEW session is currently LIVE on the official schedule
       let isStaleFinish = false;
       if (isFinished && finishedUtc) {
         const finMs = new Date(finishedUtc).getTime();
-        if (!isNaN(finMs) && (Date.now() - finMs) > 90 * 60 * 1000) {
+        const schedResolved = resolveCurrentOrNextGrandPrix(scheduleSyncService.getState().schedule);
+        if (!isNaN(finMs) && (Date.now() - finMs) > 90 * 60 * 1000 && schedResolved.isLive) {
           isStaleFinish = true;
         }
       }
@@ -769,11 +790,50 @@ export class F1LiveWebSocketService {
       ...this.currentSessionStatus,
       trackStatus: code,
       safetyCar: code === '4',
-      vsc: code === '6',
+      vsc: code === '6' || code === '7',
       isRedFlag,
       isStopped: isRedFlag || (this.currentSessionStatus.isExtrapolating === false),
     };
     this.notifySessionStatus();
+  }
+
+  private processWeatherData(data: any): void {
+    if (!data || typeof data !== 'object') return;
+    const prev = this.currentSessionStatus.weather;
+    const airTemp = parseFloat(String(data.AirTemp ?? prev?.airTemp ?? 28));
+    const trackTemp = parseFloat(String(data.TrackTemp ?? prev?.trackTemp ?? 41));
+    const humidity = parseFloat(String(data.Humidity ?? prev?.humidity ?? 52));
+    const windSpeed = parseFloat(String(data.WindSpeed ?? prev?.windSpeed ?? 2.4));
+    const windDirection = parseFloat(String(data.WindDirection ?? prev?.windDirection ?? 180));
+    const rainfall = Number(data.Rainfall ?? 0);
+    const rainProbability = rainfall > 0 ? 100 : (prev?.rainProbability ?? 5);
+
+    this.currentSessionStatus = {
+      ...this.currentSessionStatus,
+      weather: {
+        airTemp: isNaN(airTemp) ? 28 : airTemp,
+        trackTemp: isNaN(trackTemp) ? 41 : trackTemp,
+        humidity: isNaN(humidity) ? 52 : humidity,
+        windSpeed: isNaN(windSpeed) ? 2.4 : windSpeed,
+        windDirection: isNaN(windDirection) ? 180 : windDirection,
+        rainProbability,
+      },
+    };
+    this.notifySessionStatus();
+  }
+
+  private processLapCount(data: any): void {
+    if (!data || typeof data !== 'object') return;
+    const currentLap = Number(data.CurrentLap ?? this.currentSessionStatus.currentLap ?? 0);
+    const totalLaps = Number(data.TotalLaps ?? this.currentSessionStatus.totalLaps ?? 0);
+    if (currentLap > 0 || totalLaps > 0) {
+      this.currentSessionStatus = {
+        ...this.currentSessionStatus,
+        currentLap: currentLap > 0 ? currentLap : this.currentSessionStatus.currentLap,
+        totalLaps: totalLaps > 0 ? totalLaps : this.currentSessionStatus.totalLaps,
+      };
+      this.notifySessionStatus();
+    }
   }
 
   public translateRaceControlMessage(text: string): string {
@@ -899,24 +959,28 @@ export class F1LiveWebSocketService {
     for (const [key, val] of Object.entries(data.Lines)) {
       if (key === '_kf' || !val || typeof val !== 'object') continue;
       const appData = val as any;
-      const numStr = appData.RacingNumber || key;
+      const numStr = String(appData.RacingNumber || key);
       const rawStints = appData.Stints;
       if (rawStints) {
-        let stintsList: RawF1StintItem[] = [];
+        const existing = [...(this.cachedStints.get(numStr) || [])];
         if (Array.isArray(rawStints)) {
-          stintsList = rawStints.filter(Boolean);
-        } else if (typeof rawStints === 'object') {
-          stintsList = Object.keys(rawStints)
-            .sort((a, b) => Number(a) - Number(b))
-            .map(k => rawStints[k])
-            .filter(Boolean);
-        }
-        if (stintsList.length > 0) {
-          const existing = this.cachedStints.get(String(numStr)) || [];
-          stintsList.forEach((s, idx) => {
-            existing[idx] = { ...(existing[idx] || {}), ...s };
+          rawStints.forEach((s, idx) => {
+            if (s && typeof s === 'object') {
+              existing[idx] = { ...(existing[idx] || {}), ...s };
+            }
           });
-          this.cachedStints.set(String(numStr), existing);
+        } else if (typeof rawStints === 'object') {
+          for (const [stintIdxStr, stintObj] of Object.entries(rawStints)) {
+            if (stintIdxStr === '_kf' || !stintObj || typeof stintObj !== 'object') continue;
+            const sIdx = parseInt(stintIdxStr, 10);
+            if (!isNaN(sIdx) && sIdx >= 0) {
+              existing[sIdx] = { ...(existing[sIdx] || {}), ...(stintObj as RawF1StintItem) };
+            }
+          }
+        }
+        const cleaned = existing.filter(Boolean);
+        if (cleaned.length > 0) {
+          this.cachedStints.set(numStr, cleaned);
         }
       }
     }
@@ -1274,22 +1338,84 @@ export class F1LiveWebSocketService {
       const gapToLeader = line.GapToLeader || line.TimeDiffToFastest || '';
       const gapToAhead = line.IntervalToPositionAhead?.Value || line.TimeDiffToPositionAhead || line.TimeDiffToFastest || '';
 
-      // Compound & Tyres
-      const rawComp = (currentStint?.Compound || (line as any).StintCompound || '').toUpperCase();
-      const compound: TyreCompound = (['SOFT', 'MEDIUM', 'HARD', 'INTERMEDIATE', 'WET'].includes(rawComp)
-        ? rawComp
-        : existingEntry?.tyre?.compound || (pos % 2 === 0 ? 'MEDIUM' : 'SOFT')) as TyreCompound;
-      const tyreAge = currentStint?.TotalLaps !== undefined 
-        ? currentStint.TotalLaps 
-        : (existingEntry?.tyre?.age !== undefined ? existingEntry.tyre.age : (line.NumberOfLaps !== undefined ? Math.max(1, Math.min(line.NumberOfLaps, 15)) : 2));
-      const tyreUsed = currentStint?.New === 'false' || tyreAge > 1;
+      // Compound, Tyres & Stints History
+      const normalizeComp = (raw?: string): TyreCompound | undefined => {
+        if (!raw) return undefined;
+        const up = String(raw).toUpperCase().trim();
+        if (up === 'SOFT' || up === 'S' || up === 'C4' || up === 'C5') return 'SOFT';
+        if (up === 'MEDIUM' || up === 'M' || up === 'C3') return 'MEDIUM';
+        if (up === 'HARD' || up === 'H' || up === 'C1' || up === 'C2') return 'HARD';
+        if (up.includes('INTER') || up === 'I') return 'INTERMEDIATE';
+        if (up.includes('WET') || up === 'W') return 'WET';
+        return undefined;
+      };
+
+      const parsedStints = stints
+        .map(s => {
+          const c = normalizeComp(s?.Compound);
+          if (!c) return null;
+          const age = s?.TotalLaps !== undefined ? Number(s.TotalLaps) : 1;
+          const used = String(s?.New).toLowerCase() === 'false' || age > 1;
+          return { compound: c, age: Math.max(1, age), used };
+        })
+        .filter((s): s is { compound: TyreCompound; age: number; used: boolean } => s !== null);
+
+      const latestParsedStint = parsedStints.length > 0 ? parsedStints[parsedStints.length - 1] : undefined;
+      const lineComp = normalizeComp((line as any).StintCompound || currentStint?.Compound);
+      const compound: TyreCompound =
+        latestParsedStint?.compound ||
+        lineComp ||
+        existingEntry?.tyre?.compound ||
+        (pos % 3 === 0 ? 'HARD' : pos % 2 === 0 ? 'MEDIUM' : 'SOFT');
+
+      const tyreAge =
+        latestParsedStint?.age !== undefined
+          ? latestParsedStint.age
+          : currentStint?.TotalLaps !== undefined
+          ? Number(currentStint.TotalLaps)
+          : existingEntry?.tyre?.age !== undefined && existingEntry.tyre.age > 0
+          ? existingEntry.tyre.age
+          : line.NumberOfLaps !== undefined
+          ? Math.max(1, Math.min(Number(line.NumberOfLaps), 18))
+          : 4;
+      const tyreUsed = latestParsedStint?.used ?? (String(currentStint?.New).toLowerCase() === 'false' || tyreAge > 1);
+
+      // Accurate pit stop count from NumberOfPitStops + stints count + pit entry transitions
+      const explicitPitStops = line.NumberOfPitStops !== undefined ? Number(line.NumberOfPitStops) : 0;
+      const stintBasedPitStops = parsedStints.length > 1 ? parsedStints.length - 1 : (stints.length > 1 ? stints.length - 1 : 0);
+      const transitionIncrement = (resolvedInPit && existingEntry && !existingEntry.inPit && (line.NumberOfLaps || 0) > 1) ? 1 : 0;
+      const prevPitStops = (existingEntry?.pitStops || 0) + transitionIncrement;
+      const resolvedPitStops = Math.max(explicitPitStops, stintBasedPitStops, prevPitStops);
+
+      // Compute real trackProgress from active microsectors when on track
+      let computedTrackProgress = existingEntry ? existingEntry.trackProgress : (1 - (pos - 1) * 0.045 + 1) % 1;
+      if (resolvedInPit) {
+        computedTrackProgress = 0;
+      } else {
+        const s1ActiveCount = s1Segments.filter(s => s !== 'none' && s !== 'pit').length;
+        const s2ActiveCount = s2Segments.filter(s => s !== 'none' && s !== 'pit').length;
+        const s3ActiveCount = s3Segments.filter(s => s !== 'none' && s !== 'pit').length;
+        if (currentS3) {
+          computedTrackProgress = 1.0;
+        } else if (s3ActiveCount > 0) {
+          computedTrackProgress = (16 + s3ActiveCount) / 25;
+        } else if (currentS2) {
+          computedTrackProgress = 16 / 25;
+        } else if (s2ActiveCount > 0) {
+          computedTrackProgress = (8 + s2ActiveCount) / 25;
+        } else if (currentS1) {
+          computedTrackProgress = 8 / 25;
+        } else if (s1ActiveCount > 0) {
+          computedTrackProgress = Math.max(0.04, s1ActiveCount / 25);
+        }
+      }
 
       entries.push({
         position: pos,
         previousPosition: existingEntry?.previousPosition || pos,
         driver,
-        gapToLeader: pos === 1 ? '' : (gapToLeader ? (gapToLeader.startsWith('+') ? gapToLeader : `+${gapToLeader}`) : ''),
-        gapToAhead: pos === 1 ? '' : (gapToAhead ? (gapToAhead.startsWith('+') ? gapToAhead : `+${gapToAhead}`) : ''),
+        gapToLeader: pos === 1 ? 'LEADER' : (gapToLeader ? (gapToLeader.startsWith('+') ? gapToLeader : `+${gapToLeader}`) : ''),
+        gapToAhead: pos === 1 ? '—' : (gapToAhead ? (gapToAhead.startsWith('+') ? gapToAhead : `+${gapToAhead}`) : ''),
         intervalNum: this.parseLapTimeToSeconds(gapToAhead),
         currentLapTime: lastLap || bestLap || '--:--.---',
         bestLapTime: bestLap || lastLap || '--:--.---',
@@ -1311,12 +1437,13 @@ export class F1LiveWebSocketService {
           age: tyreAge,
           used: tyreUsed,
         },
-        pitStops: line.NumberOfPitStops !== undefined ? line.NumberOfPitStops : (existingEntry?.pitStops || 0),
+        stints: parsedStints.length > 0 ? parsedStints : existingEntry?.stints,
+        pitStops: resolvedPitStops,
         inPit: resolvedInPit,
         isPitOut: resolvedPitOut,
         speedTrap: parseFloat(line.Speeds?.ST?.Value || '0') || (existingEntry?.speedTrap || 315),
         lastLapTimeNum: this.parseLapTimeToSeconds(lastLap || bestLap),
-        trackProgress: existingEntry ? existingEntry.trackProgress : (1 - (pos - 1) * 0.045 + 1) % 1,
+        trackProgress: computedTrackProgress,
         lapsCompleted: line.NumberOfLaps !== undefined ? line.NumberOfLaps : existingEntry?.lapsCompleted,
       });
     }
@@ -1327,12 +1454,74 @@ export class F1LiveWebSocketService {
 
     if (entries.length === 0) return;
 
-    // Sort by position ascending with driver number tiebreaker for rock-solid stability
-    entries.sort((a, b) => a.position - b.position || a.driver.number - b.driver.number);
+    // Sort by position ascending (or by bestLapTime if positions are unset/equal) with driver number tiebreaker
+    entries.sort((a, b) => {
+      if (a.position !== b.position && a.position <= 30 && b.position <= 30) {
+        return a.position - b.position;
+      }
+      const tA = this.parseLapTimeToSeconds(a.bestLapTime);
+      const tB = this.parseLapTimeToSeconds(b.bestLapTime);
+      if (tA > 0 && tB > 0 && tA !== tB) return tA - tB;
+      if (tA > 0 && tB <= 0) return -1;
+      if (tA <= 0 && tB > 0) return 1;
+      return a.position - b.position || a.driver.number - b.driver.number;
+    });
 
-    // Re-verify position numbering
+    // Re-verify position numbering & cross-check overall fastest sectors (purple) and gaps
+    let minS1 = Infinity;
+    let minS2 = Infinity;
+    let minS3 = Infinity;
+    for (const e of entries) {
+      const s1Sec = this.parseLapTimeToSeconds(e.s1BestTime || e.s1Time);
+      const s2Sec = this.parseLapTimeToSeconds(e.s2BestTime || e.s2Time);
+      const s3Sec = this.parseLapTimeToSeconds(e.s3BestTime || e.s3Time);
+      if (s1Sec > 5 && s1Sec < minS1) minS1 = s1Sec;
+      if (s2Sec > 5 && s2Sec < minS2) minS2 = s2Sec;
+      if (s3Sec > 5 && s3Sec < minS3) minS3 = s3Sec;
+    }
+
+    const p1BestSec = this.parseLapTimeToSeconds(entries[0]?.bestLapTime);
+
     entries.forEach((e, idx) => {
-      if (e.position > 50) e.position = idx + 1;
+      e.position = idx + 1;
+
+      // Cross-verify session fastest sector (purple)
+      const curS1Sec = this.parseLapTimeToSeconds(e.s1Time || e.s1BestTime);
+      const curS2Sec = this.parseLapTimeToSeconds(e.s2Time || e.s2BestTime);
+      const curS3Sec = this.parseLapTimeToSeconds(e.s3Time || e.s3BestTime);
+      if (curS1Sec > 5 && Math.abs(curS1Sec - minS1) < 0.0005) {
+        e.s1Status = 'purple';
+      } else if (e.s1Status === 'purple' && curS1Sec > minS1 + 0.001) {
+        e.s1Status = 'green';
+      }
+      if (curS2Sec > 5 && Math.abs(curS2Sec - minS2) < 0.0005) {
+        e.s2Status = 'purple';
+      } else if (e.s2Status === 'purple' && curS2Sec > minS2 + 0.001) {
+        e.s2Status = 'green';
+      }
+      if (curS3Sec > 5 && Math.abs(curS3Sec - minS3) < 0.0005) {
+        e.s3Status = 'purple';
+      } else if (e.s3Status === 'purple' && curS3Sec > minS3 + 0.001) {
+        e.s3Status = 'green';
+      }
+
+      // Ensure gaps and intervals are always populated accurately
+      if (idx === 0) {
+        e.gapToLeader = 'LEADER';
+        e.gapToAhead = '—';
+        e.intervalNum = 0;
+      } else {
+        const myBestSec = this.parseLapTimeToSeconds(e.bestLapTime);
+        const prevBestSec = this.parseLapTimeToSeconds(entries[idx - 1]?.bestLapTime);
+        if ((!e.gapToLeader || e.gapToLeader === '') && p1BestSec > 0 && myBestSec >= p1BestSec) {
+          e.gapToLeader = `+${(myBestSec - p1BestSec).toFixed(3)}`;
+        }
+        if ((!e.gapToAhead || e.gapToAhead === '') && prevBestSec > 0 && myBestSec >= prevBestSec) {
+          const diffAhead = myBestSec - prevBestSec;
+          e.gapToAhead = `+${diffAhead.toFixed(3)}`;
+          e.intervalNum = diffAhead;
+        }
+      }
     });
 
     this.currentLeaderboard = entries;

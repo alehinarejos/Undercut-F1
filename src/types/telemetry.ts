@@ -46,6 +46,7 @@ export interface LeaderboardEntry {
   s2Segments?: SectorStatus[];
   s3Segments?: SectorStatus[];
   tyre: TyreInfo;
+  stints?: TyreInfo[];
   pitStops: number;
   inPit: boolean;
   isPitOut: boolean;
